@@ -1,0 +1,95 @@
+# iCaloFlow Lightning — Flow-3 training config (iterative layer pairs p(I_i | ...)).
+# Run: uv run python main.py fit --config params/icaloflow_flow3.yaml
+#
+# Paper Table 3 (DS2): base lr 2e-5, max lr 1e-3, 60 epochs, batch 1000.
+# LEMURS FCCeeALLEGRO: 899,368 events; Flow-3 dataset is 44x (one layer pair
+# per event per __getitem__, sampled uniformly in 1..44).
+#
+# NOTE: with the per-item layer sampling, one epoch = one random layer per
+# event (~891 steps), i.e. ~44x fewer pair samples/epoch than the reference's
+# sequential iteration over all 44 pairs. Effective epoch count may need to
+# be raised to match the paper's exposure; adjust max_epochs accordingly.
+
+trainer:
+  stage_dir: /pscratch/sd/p/pmtuan/caloinn_icaloflow
+  run_name: flow3
+  accelerator: auto
+  devices: 1
+  max_epochs: 120
+  precision: 32
+  logger:
+    - class_path: lightning.pytorch.loggers.CSVLogger
+      init_args:
+        save_dir: /pscratch/sd/p/pmtuan/caloinn_icaloflow/csv_logs
+        name: flow3_f32
+    - class_path: calogen.core.wandb.WandbLogger
+      init_args:
+        stage_dir: /pscratch/sd/p/pmtuan/caloinn_icaloflow/wandb_logs
+        project: icaloflow_lightning
+        group: flow3
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val_loss
+        mode: min
+        save_top_k: 1
+        filename: "flow3-{epoch}-{val_loss:.2f}"
+        save_last: true
+        save_on_exception: true
+        verbose: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val_loss
+        mode: min
+        patience: 10
+        verbose: true
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+    - class_path: calogen.core.callbacks.plot_latent.PlotLatentCallback
+      init_args:
+        latent_variables: [0, 1, 2]
+
+data:
+  class_path: calogen.models.icaloflow.datamodule.ICaloFlowDataModule
+  init_args:
+    which_flow: 4
+    data_path: /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_train.h5
+    val_data_path: /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/validation/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_part10.h5
+    xml_path: configs/binning_lemurs_fcceeallegro.xml
+    xml_ptype: photon
+    batch_size: 1000
+    val_frac: 0.01
+    noise_level: 1.0e-8
+    safety_factor: 1.5
+    num_workers: 4
+    max_events: 899368
+    max_events_val: 100000
+    seed: 42
+    default_max_events: 200000
+    load_chunk: 20000
+    energy_ref_mev: 31622.776601683792
+    cache_mode: memmap
+    cache_dir: /pscratch/sd/p/pmtuan/caloinn_icaloflow_cache
+    cache_chunk: 100000
+
+model:
+  class_path: calogen.models.icaloflow.lightning.ICaloFlowLightningModule
+  init_args:
+    which_flow: 4
+    hidden_size: 256
+    n_blocks: 8
+    n_bins: 8
+    tail_bound: 14.0
+    num_layers_flow3: 2
+    num_layers: 45
+    cells_per_layer: 144
+    energy_ref_mev: 31622.776601683792
+    noise_level: 1.0e-8
+    threshold_cut: 0.0
+    model_dtype: float32
+    scheduler_params:
+      lr: 2.0e-5
+      max_lr: 1.0e-3
+      epochs: 120
+      steps_per_epoch: 891
