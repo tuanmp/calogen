@@ -70,7 +70,8 @@ def hist_with_ratio(ref, gens: Dict[str, np.ndarray], bins, xlabel,
     return fig
 
 
-def save_fig(fig, path: str) -> None:
+def save_fig(fig, path: str, close: bool = True) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    if close:
+        plt.close(fig)

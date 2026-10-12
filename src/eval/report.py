@@ -30,12 +30,22 @@ def _bins_for(obs, ref_vals, gen_vals, n_bins=60):
         pos = flat[flat > 0]
         lo = np.log10(pos.min()) if pos.size else -6.0
         hi = np.log10(pos.max()) if pos.size else 0.0
+        if hi <= lo:
+            hi = lo + 1.0
         return np.logspace(lo, hi, n_bins)
-    return np.linspace(flat.min(), flat.max(), n_bins)
+    lo, hi = flat.min(), flat.max()
+    if hi <= lo:
+        pad = max(abs(lo), 1.0) * 1e-6
+        lo, hi = lo - pad, hi + pad
+    return np.linspace(lo, hi, n_bins)
 
 
 def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
+    from matplotlib import pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+
     from calogen.eval.plots import hist_with_ratio, save_fig, set_style
+
     set_style()
     os.makedirs(cfg.out_dir, exist_ok=True)
 
@@ -59,21 +69,31 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
     artifacts: List[str] = []
     lines = [f"truth: {cfg.truth} ({len(truth.showers)} events)"]
 
+    pdf = PdfPages(os.path.join(cfg.out_dir, "summary.pdf")) if cfg.make_pdf else None
+
+    def emit(fig, path):
+        save_fig(fig, path, close=False)
+        if pdf is not None:
+            pdf.savefig(fig)
+        plt.close(fig)
+        artifacts.append(path)
+
     for name in names:
         obs = OBSERVABLES[name]
         ref = obs.compute(ctx_truth)
         gen_vals = {g.label: obs.compute(ctx) for g, ctx in zip(gens, ctx_gens)}
 
         if name == "layer_energy_corr":
+            diffs = []
             for g, ctx in zip(gens, ctx_gens):
                 diff = corr_matrix_diff(ref, obs.compute(ctx))
+                diffs.append(round(diff, 4))
                 records.append(MetricRecord(name, -1, "corr_frobenius", diff))
+            lines.append(f"{name}: frobenius vs truth = {diffs}")
             continue
 
         bins = _bins_for(obs, ref, list(gen_vals.values()))
-        records += distribution_metrics(ref, list(gen_vals.values())[0], name, bins,
-                                        obs.per_layer, N_LAYERS)
-        for g in gens[1:]:
+        for g in gens:
             records += distribution_metrics(ref, gen_vals[g.label], name, bins,
                                             obs.per_layer, N_LAYERS)
 
@@ -81,14 +101,10 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
             for layer in range(N_LAYERS):
                 fig = hist_with_ratio(ref[:, layer], {k: v[:, layer] for k, v in gen_vals.items()},
                                       bins=bins, xlabel=obs.xlabel, xscale=obs.xscale)
-                path = os.path.join(cfg.out_dir, "plots", f"{name}_layer{layer + 1:02d}.png")
-                save_fig(fig, path)
-                artifacts.append(path)
+                emit(fig, os.path.join(cfg.out_dir, "plots", f"{name}_layer{layer + 1:02d}.png"))
         else:
             fig = hist_with_ratio(ref, gen_vals, bins=bins, xlabel=obs.xlabel, xscale=obs.xscale)
-            path = os.path.join(cfg.out_dir, "plots", f"{name}.png")
-            save_fig(fig, path)
-            artifacts.append(path)
+            emit(fig, os.path.join(cfg.out_dir, "plots", f"{name}.png"))
 
         if obs.per_layer:
             w = [r.value for r in records if r.observable == name and r.metric == "wasserstein"]
@@ -97,9 +113,14 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
             w = [r.value for r in records if r.observable == name and r.metric == "wasserstein"]
             lines.append(f"{name}: wasserstein={w[0]:.4g}" if w else f"{name}: n/a")
 
+    if pdf is not None:
+        pdf.close()
+        artifacts.append(os.path.join(cfg.out_dir, "summary.pdf"))
+
     metrics = [asdict(r) for r in records]
     with open(os.path.join(cfg.out_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
+
     summary = "\n".join(lines)
     with open(os.path.join(cfg.out_dir, "summary.txt"), "w") as f:
         f.write(summary + "\n")
