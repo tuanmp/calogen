@@ -22,20 +22,31 @@ class EvalResult:
     summary: str
 
 
-def _bins_for(obs, ref_vals, gen_vals, n_bins=60):
+def _bins_for(obs, ref_vals, gen_vals, n_bins=60, robust=False,
+              qlo=0.001, qhi=0.999):
     flat = np.concatenate([np.asarray(ref_vals).reshape(-1),
                            *[np.asarray(g).reshape(-1) for g in gen_vals]])
     flat = flat[np.isfinite(flat)]
     if obs.xscale == "log":
         pos = flat[flat > 0]
-        lo = np.log10(pos.min()) if pos.size else -6.0
-        hi = np.log10(pos.max()) if pos.size else 0.0
+        if pos.size == 0:
+            return np.logspace(-6, 0, n_bins)
+        if robust:
+            lo, hi = np.log10(np.percentile(pos, [qlo * 100, qhi * 100]))
+        else:
+            lo, hi = np.log10(pos.min()), np.log10(pos.max())
         if hi <= lo:
             hi = lo + 1.0
         return np.logspace(lo, hi, n_bins)
-    lo, hi = flat.min(), flat.max()
+    if robust:
+        lo, hi = np.percentile(flat, [qlo * 100, qhi * 100])
+    else:
+        lo, hi = flat.min(), flat.max()
     if hi <= lo:
         pad = max(abs(lo), 1.0) * 1e-6
+        lo, hi = lo - pad, hi + pad
+    else:
+        pad = 0.05 * (hi - lo)
         lo, hi = lo - pad, hi + pad
     return np.linspace(lo, hi, n_bins)
 
@@ -93,6 +104,7 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
             continue
 
         bins = _bins_for(obs, ref, list(gen_vals.values()))
+        bins_plot = _bins_for(obs, ref, list(gen_vals.values()), robust=True)
         for g in gens:
             records += distribution_metrics(ref, gen_vals[g.label], name, bins,
                                             obs.per_layer, N_LAYERS)
@@ -100,10 +112,10 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
         if obs.per_layer:
             for layer in range(N_LAYERS):
                 fig = hist_with_ratio(ref[:, layer], {k: v[:, layer] for k, v in gen_vals.items()},
-                                      bins=bins, xlabel=obs.xlabel, xscale=obs.xscale)
+                                      bins=bins_plot, xlabel=obs.xlabel, xscale=obs.xscale)
                 emit(fig, os.path.join(cfg.out_dir, "plots", f"{name}_layer{layer + 1:02d}.png"))
         else:
-            fig = hist_with_ratio(ref, gen_vals, bins=bins, xlabel=obs.xlabel, xscale=obs.xscale)
+            fig = hist_with_ratio(ref, gen_vals, bins=bins_plot, xlabel=obs.xlabel, xscale=obs.xscale)
             emit(fig, os.path.join(cfg.out_dir, "plots", f"{name}.png"))
 
         if obs.per_layer:
