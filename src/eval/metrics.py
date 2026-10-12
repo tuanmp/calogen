@@ -14,6 +14,7 @@ class MetricRecord:
     layer: int
     metric: str
     value: float
+    generator: str = ""
 
 
 def separation_power(ref_norm: np.ndarray, gen_norm: np.ndarray) -> float:
@@ -33,7 +34,8 @@ def _hist_norm(values, bins):
     return counts / total if total > 0 else counts.astype(np.float64)
 
 
-def distribution_metrics(ref, gen, name, bins, per_layer, n_layers) -> List[MetricRecord]:
+def distribution_metrics(ref, gen, name, bins, per_layer, n_layers,
+                         generator="generator") -> List[MetricRecord]:
     ref = np.asarray(ref, dtype=np.float64)
     gen = np.asarray(gen, dtype=np.float64)
     out: List[MetricRecord] = []
@@ -41,16 +43,16 @@ def distribution_metrics(ref, gen, name, bins, per_layer, n_layers) -> List[Metr
     if not per_layer:
         ref = ref.reshape(-1)
         gen = gen.reshape(-1)
-        out.append(MetricRecord(name, -1, "wasserstein", float(wasserstein_distance(ref, gen))))
-        out.append(MetricRecord(name, -1, "ks", float(ks_2samp(ref, gen).statistic)))
+        out.append(MetricRecord(name, -1, "wasserstein", float(wasserstein_distance(ref, gen)), generator))
+        out.append(MetricRecord(name, -1, "ks", float(ks_2samp(ref, gen).statistic), generator))
         out.append(MetricRecord(name, -1, "separation_power",
-                                separation_power(_hist_norm(ref, bins), _hist_norm(gen, bins))))
+                                separation_power(_hist_norm(ref, bins), _hist_norm(gen, bins)), generator))
         return out
 
     for layer in range(n_layers):
         r, g = ref[:, layer], gen[:, layer]
-        out.append(MetricRecord(name, layer, "wasserstein", float(wasserstein_distance(r, g))))
-        out.append(MetricRecord(name, layer, "ks", float(ks_2samp(r, g).statistic)))
+        out.append(MetricRecord(name, layer, "wasserstein", float(wasserstein_distance(r, g)), generator))
+        out.append(MetricRecord(name, layer, "ks", float(ks_2samp(r, g).statistic), generator))
         out.append(MetricRecord(name, layer, "separation_power",
-                                separation_power(_hist_norm(r, bins), _hist_norm(g, bins))))
+                                separation_power(_hist_norm(r, bins), _hist_norm(g, bins)), generator))
     return out

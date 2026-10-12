@@ -95,11 +95,11 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
         gen_vals = {g.label: obs.compute(ctx) for g, ctx in zip(gens, ctx_gens)}
 
         if name == "layer_energy_corr":
-            diffs = []
+            diffs = {}
             for g, ctx in zip(gens, ctx_gens):
                 diff = corr_matrix_diff(ref, obs.compute(ctx))
-                diffs.append(round(diff, 4))
-                records.append(MetricRecord(name, -1, "corr_frobenius", diff))
+                diffs[g.label] = round(diff, 4)
+                records.append(MetricRecord(name, -1, "corr_frobenius", diff, g.label))
             lines.append(f"{name}: frobenius vs truth = {diffs}")
             continue
 
@@ -107,7 +107,7 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
         bins_plot = _bins_for(obs, ref, list(gen_vals.values()), robust=True)
         for g in gens:
             records += distribution_metrics(ref, gen_vals[g.label], name, bins,
-                                            obs.per_layer, N_LAYERS)
+                                            obs.per_layer, N_LAYERS, generator=g.label)
 
         if obs.per_layer:
             for layer in range(N_LAYERS):
@@ -118,12 +118,17 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
             fig = hist_with_ratio(ref, gen_vals, bins=bins_plot, xlabel=obs.xlabel, xscale=obs.xscale)
             emit(fig, os.path.join(cfg.out_dir, "plots", f"{name}.png"))
 
-        if obs.per_layer:
-            w = [r.value for r in records if r.observable == name and r.metric == "wasserstein"]
-            lines.append(f"{name}: mean wasserstein={np.mean(w):.4g} over {len(w)} layers")
-        else:
-            w = [r.value for r in records if r.observable == name and r.metric == "wasserstein"]
-            lines.append(f"{name}: wasserstein={w[0]:.4g}" if w else f"{name}: n/a")
+        parts = []
+        for g in gens:
+            w = [r.value for r in records
+                 if r.observable == name and r.metric == "wasserstein" and r.generator == g.label]
+            if not w:
+                parts.append(f"{g.label}: n/a")
+            elif obs.per_layer:
+                parts.append(f"{g.label}: mean wasserstein={np.mean(w):.4g}")
+            else:
+                parts.append(f"{g.label}: wasserstein={w[0]:.4g}")
+        lines.append(f"{name}: " + " | ".join(parts))
 
     if pdf is not None:
         pdf.close()
