@@ -604,7 +604,7 @@ class ICaloFlowLightningModule(BaseGenerativeModule):
 
     def _cond_inc(self, energy_mev: torch.Tensor) -> torch.Tensor:
         """log10(E_inc / energy_ref_mev) condition, cast to the flow dtype."""
-        dtype = next(self.flow1.parameters()).dtype
+        dtype = next(self.active_flow.parameters()).dtype
         return log10_energy(energy_mev.to(dtype=dtype), self.energy_ref_mev)
 
     # ------------------------------------------------------------------
@@ -653,7 +653,8 @@ class ICaloFlowLightningModule(BaseGenerativeModule):
     ) -> torch.Tensor:
         """Flow-2: layer-0 voxels (B, cells) MeV -> z2 latent (B, cells)."""
         flow2 = self._select_flow(use_student, self.flow2_student, self.flow2)
-        dtype = next(self.flow1.parameters()).dtype
+        active_flow = self._select_flow(use_student, self.flow2_student, self.flow2)
+        dtype = next(active_flow.parameters()).dtype
         norm = float(self.normalization_constant)
         c_inc = self._cond_inc(energy_mev)
         E0 = E0_mev.to(dtype=dtype)
@@ -674,7 +675,8 @@ class ICaloFlowLightningModule(BaseGenerativeModule):
     ) -> torch.Tensor:
         """Flow-2: z2 latent (B, cells) -> layer-0 voxels (B, cells) MeV."""
         flow2 = self._select_flow(use_student, self.flow2_student, self.flow2)
-        dtype = next(self.flow1.parameters()).dtype
+        active_flow = self._select_flow(use_student, self.flow2_student, self.flow2)
+        dtype = next(active_flow.parameters()).dtype
         norm = float(self.normalization_constant)
         thr = float(self.threshold_cut)
         c_inc = self._cond_inc(energy_mev)
@@ -692,7 +694,7 @@ class ICaloFlowLightningModule(BaseGenerativeModule):
         layer_prev_mev: torch.Tensor,
         E_i_mev: torch.Tensor,
         E_prev_mev: torch.Tensor,
-        i: int,
+        i: int | torch.Tensor,
         energy_mev: torch.Tensor,
         noise_level: float = 0.0,
         use_student: bool = False,
@@ -702,8 +704,15 @@ class ICaloFlowLightningModule(BaseGenerativeModule):
         ``i`` is the 1-based layer number (1..num_layers-1).  ``layer_prev_mev`` /
         ``E_prev_mev`` are the previous layer's voxels and energy.
         """
+        if use_student:
+            assert self.flow3_student is not None, "encode_flow3: student requested but not built"
+        else: 
+            assert self.flow3 is not None, "encode_flow3: teacher requested but not built"
+
+        if not isinstance(i, torch.Tensor):
+            i = torch.full((layer_i_mev.shape[0],), i, dtype=torch.long, device=layer_i_mev.device)
         flow3 = self._select_flow(use_student, self.flow3_student, self.flow3)
-        dtype = next(self.flow1.parameters()).dtype
+        dtype = next(self.flow3.parameters()).dtype
         norm = float(self.normalization_constant)
         b = layer_i_mev.shape[0]
         device = layer_i_mev.device
@@ -717,7 +726,7 @@ class ICaloFlowLightningModule(BaseGenerativeModule):
                 logit_trafo(E_prev / norm),
                 self._voxel_logit(layer_prev_mev.to(dtype=dtype), noise_level),
                 one_hot(
-                    torch.full((b,), i, dtype=torch.long, device=device),
+                    i,
                     self.num_layers - 1,
                 ),
             ],
