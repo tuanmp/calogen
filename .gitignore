@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*egg-info/
+
+# parity artifacts (regenerated locally)
+reference/*.npz
+reference/*.h5
+
+# training outputs / checkpoints
+*.ckpt
+lightning_logs/
+wandb/
+csv_logs/
+reference/
+notebooks/
+configs/
+assets/
+slurm_logs/
+
+uv.lock
+AGENTS.md
+opencode.json
+
+*.png
+*.pdf
+*.json

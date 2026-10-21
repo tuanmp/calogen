@@ -1,0 +1,13 @@
+truth: /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/validation/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_part10.h5
+generators:
+  - {label: CaloINN, path: /path/to/generated.h5}
+binning_xml: configs/binning_lemurs_fcceeallegro.xml
+particle: photon
+out_dir: results/eval_lemurs
+max_events: null
+threshold_mev: 0.015
+observables: null
+by_energy: false
+energy_bins: 8
+make_pdf: true
+seed: 42

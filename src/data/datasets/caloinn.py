@@ -124,6 +124,8 @@ class CaloINNDataset(Dataset):
                 x += noise
             else:
                 x = data_util.add_noise(x, self.width_noise)  # vectorised random noise
+                # added a second dose of noise here to check parity with a bug in legacy code
+                x = data_util.add_noise(x, self.width_noise)  # vectorised random noise
 
         return x, c
 

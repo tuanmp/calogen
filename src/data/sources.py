@@ -5,8 +5,8 @@ from typing import Tuple
 
 import h5py
 import numpy as np
-from calogen.data.data_util import TruthFormat
 
+from .data_util import TruthFormat
 from .io import _read_rows
 
 # HDF5 read-cache settings — small enough for per-worker handles

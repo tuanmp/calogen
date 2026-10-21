@@ -6,9 +6,8 @@ from typing import Optional, Tuple
 
 import h5py
 import numpy as np
-
-from calogen.core.data_util import TruthFormat
-from calogen.core.lemurs import LEMURSHDF5Source, _transpose_and_flatten
+from calogen.data.data_util import TruthFormat
+from calogen.data.sources import HDF5Source
 
 
 @dataclass
@@ -39,16 +38,17 @@ def load_showers(
         idx = np.arange(n_total)
 
     if fmt.showers_grid_shape is not None:
-        source = LEMURSHDF5Source(path)
+        source = HDF5Source(path)
         try:
             showers, energies = source.read_rows(idx)
+            showers = source.truth_format.flatten_showers(showers)
+            energies = source.truth_format.format_energy(energies)
         finally:
             source.close()
-        showers = showers.astype(np.float32)
-        energies = energies.reshape(-1).astype(np.float64)
+
     else:
         with h5py.File(path, "r") as f:
-            showers = _transpose_and_flatten(np.asarray(f["showers"][idx], dtype=np.float32))
+            showers = np.asarray(f["showers"][idx], dtype=np.float32)
             energies = np.asarray(f["incident_energies"][idx], dtype=np.float64).reshape(-1)
 
     if energy_range is not None:

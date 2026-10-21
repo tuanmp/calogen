@@ -1,0 +1,139 @@
+# CaloINN Lightning — LEMURS FCCeeALLEGRO gamma training config
+# Run: uv run python main.py fit --config params/lemurs_fcceeallegro.yaml
+#
+# Dataset: 900k gamma showers, 1–100 GeV, ALLEGRO detector
+# Dims: 6480 cells + 45 layers = 6525
+seed_everything: 2026
+
+trainer:
+  stage_dir: /pscratch/sd/p/pmtuan/caloinn_lemurs
+  run_name: lemurs_fcceeallegro_full
+  accelerator: auto
+  devices: 1
+  max_epochs: 500
+  precision: 32
+  num_sanity_val_steps: 0
+  val_check_interval: 0.1
+  logger:
+    - class_path: lightning.pytorch.loggers.CSVLogger
+      init_args:
+        save_dir: /pscratch/sd/p/pmtuan/caloinn_lemurs/csv_logs
+        name: lemurs_fcceeallegro_full
+    - class_path: calogen.core.wandb.WandbLogger
+      init_args:
+        stage_dir: /pscratch/sd/p/pmtuan/caloinn_lemurs/wandb_logs
+        project: caloinn_lightning
+        group: lemurs_fcceeallegro_debug
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val_loss
+        mode: min
+        save_top_k: 3
+        filename: "{epoch}-{val_loss:.2f}"
+        save_last: true
+        save_on_exception: true
+        verbose: true
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 50
+        save_top_k: -1
+        filename: "epoch{epoch:04d}"
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+    - class_path: calogen.core.callbacks.actnorm_warmup.ActNormWarmupCallback
+      init_args:
+        enabled: true
+        num_samples: 10000
+        deterministic_seed: 2026
+        disable_batchnorm_updates: true
+        calibration_source: module_cache
+    - class_path: calogen.core.callbacks.pretraining_val.PretrainingValidationCallback
+    - class_path: calogen.core.callbacks.prediction_writer.PredictionWriter
+      init_args:
+        predict_output_file: lightning-sample.hdf5
+
+
+data:
+  # class_path: calogen.core.lemurs.LEMURSDataModule
+  class_path: calogen.data.datamodules.caloinn.CaloINNDataModule
+  init_args:
+    data_path: /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_train.h5
+    val_data_path: /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/validation/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_part10.h5
+    batch_size: 1024
+    xml_path: configs/binning_lemurs_fcceeallegro.xml
+    xml_ptype: photon
+    val_frac: 0.01
+    eps: 0.0000000001
+    u0up_cut: 0.20
+    u0low_cut: 0.0
+    rew: 1.0
+    dep_cut: 600
+    # width_noise: 0.000005
+    width_noise: 1e-5
+    fixed_noise: false
+    shuffle: true
+    num_workers: 2
+    predict_batch_size: 1000
+    eval_dataset: "1-photons"
+    cache_mode: memmap
+    cache_dir: /pscratch/sd/p/pmtuan/caloinn_cache/fcceeallegro_newcache
+    cache_chunk: 10000
+
+model:
+  class_path: calogen.models.caloinn.lightning.CaloINNLightningModule
+  init_args:
+    setup_data_sample_path:  /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_train.h5
+    max_init_samples: 20000
+    shuffle_init_batch: false
+    # width_noise: 0.000005
+    width_noise: 1e-5
+    custom_noise: false
+    xml_path: configs/binning_lemurs_fcceeallegro.xml
+    xml_ptype: photon
+    enable_diagnostics: false
+    inspect_dimensions: [0, 5, 10, 100, 400, 1000, 3000, 5000, 6000]
+    dataset_params:
+      xml_ptype: photon
+      eps: 0.0000000001
+      u0up_cut: 0.20
+      u0low_cut: 0.0
+      pt_rew: 1.0
+      dep_cut: 600
+      eval_dataset: "1-photons"
+    optimizer_params:
+      lr: 0.00001
+      betas: [0.9, 0.999]
+      eps: 0.0000000001
+      weight_decay: 0.01
+    scheduler_params:
+      lr_scheduler: one_cycle_lr
+      max_lr: 0.0001
+      epochs: 500
+      steps_per_epoch: 870
+    cinn_params:
+      bayesian: false
+      alpha: 0.00000001
+      # alpha_logit: 1.0e-6
+      alpha_logit: 0.000001
+      use_extra_dims: true
+      use_norm: false
+      log_cond: true
+      layers_per_block: 4
+      internal_size: 256
+      n_blocks: 12
+      # internal_size: 16
+      # n_blocks: 3
+      coupling_type: rational_quadratic
+      dropout: 0.0
+      layer_norm: nn.BatchNorm1d
+      layer_act: nn.SiLU
+      num_bins: 10
+      bounds_init: 18
+      permute_soft: false
+      permute_layer: false
+      std_init: -15.0
+      prior_prec: 5000
+      sub_layers: [linear, linear, linear, linear]
+      norm: true
