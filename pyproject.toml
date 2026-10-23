@@ -38,5 +38,4 @@ dev = [
 testpaths = ["tests"]
 
 [tool.setuptools]
-# `calogen` is an alias for the `src/` source directory.
-package-dir = { "calogen" = "src" }
+package-dir = { "calogen" = "calogen" }
