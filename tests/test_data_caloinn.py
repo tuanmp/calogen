@@ -14,6 +14,7 @@ import pickle
 import h5py
 import numpy as np
 import pytest
+import torch
 
 from calogen.core.lemurs import _transpose_and_flatten
 from calogen.data.data_util import TruthFormat
@@ -222,3 +223,51 @@ def test_cache_key_depends_on_split_and_file(tmp_path):
     st = os.stat(p)
     os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
     assert mk(0.1)._cache_path("train") != key_before
+
+
+# ---------------------------------------------------------------------------
+# add_noise: legacy stream, fast float32 draw, in-place option
+# ---------------------------------------------------------------------------
+
+from calogen.data.data_util import add_noise
+
+
+def test_add_noise_default_matches_legacy_float64_stream():
+    """draw_dtype=None must reproduce the pre-optimisation draws exactly."""
+    x = np.zeros((2, 3), dtype=np.float32)
+    np.random.seed(1234)
+    got = add_noise(x, 0.1)
+    expected = np.random.RandomState(1234).rand(2, 3) * 0.1
+    np.testing.assert_array_equal(got, expected.astype(np.float32))
+
+
+def test_add_noise_float32_draw_is_uniform_and_typed():
+    x = np.zeros((64, 128), dtype=np.float32)
+    got = add_noise(x, 1e-3, draw_dtype=np.float32)
+    assert got.dtype == np.float32
+    assert (got >= 0).all() and (got <= np.float32(1e-3)).all()
+    assert got.std() > 0 and abs(float(got.mean()) - 5e-4) < 5e-5  # ~uniform
+
+
+def test_add_noise_copy_semantics():
+    x = np.zeros((4, 5), dtype=np.float32)
+    out = add_noise(x, 1e-3)                       # default: copy
+    assert out is not x and float(np.abs(x).max()) == 0.0
+    out2 = add_noise(x, 1e-3, copy=False)          # in place
+    assert out2 is x and float(x.max()) > 0.0
+
+
+def test_add_noise_zero_width_is_identity():
+    x = np.zeros((2, 2), dtype=np.float32)
+    assert add_noise(x, 0.0) is x
+    assert add_noise(x, 0.0, copy=False) is x
+
+
+def test_add_noise_torch_tensor_stays_tensor():
+    """Regression: the old np.copy detour returned an ndarray for tensors."""
+    x = torch.zeros(4, 8)
+    out = add_noise(x, 0.1)
+    assert isinstance(out, torch.Tensor) and out.dtype == x.dtype
+    assert torch.equal(x, torch.zeros(4, 8))       # input untouched
+    deltas = out - x
+    assert bool((deltas >= 0).all()) and bool((deltas < 0.1).all())
