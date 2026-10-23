@@ -6,7 +6,7 @@
 seed_everything: 2026
 
 trainer:
-  stage_dir: /pscratch/sd/p/pmtuan/caloinn_lemurs
+  stage_dir: /sps/atlas/t/tpham/stage_dir/caloinn-train
   run_name: lemurs_fcceeallegro_full
   accelerator: auto
   devices: 1
@@ -17,13 +17,13 @@ trainer:
   logger:
     - class_path: lightning.pytorch.loggers.CSVLogger
       init_args:
-        save_dir: /pscratch/sd/p/pmtuan/caloinn_lemurs/csv_logs
+        save_dir: /sps/atlas/t/tpham/stage_dir/caloinn-train/csv_logs
         name: lemurs_fcceeallegro_full
     - class_path: calogen.core.wandb.WandbLogger
       init_args:
-        stage_dir: /pscratch/sd/p/pmtuan/caloinn_lemurs/wandb_logs
-        project: caloinn_lightning
-        group: lemurs_fcceeallegro_debug
+        stage_dir: /sps/atlas/t/tpham/stage_dir/caloinn-train
+        project: calogen_caloinn
+        group: lemurs_fcceeallegro
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -45,7 +45,7 @@ trainer:
     - class_path: calogen.core.callbacks.actnorm_warmup.ActNormWarmupCallback
       init_args:
         enabled: true
-        num_samples: 10000
+        num_samples: 5000
         deterministic_seed: 2026
         disable_batchnorm_updates: true
         calibration_source: module_cache
@@ -59,8 +59,8 @@ data:
   # class_path: calogen.core.lemurs.LEMURSDataModule
   class_path: calogen.data.datamodules.caloinn.CaloINNDataModule
   init_args:
-    data_path: /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_train.h5
-    val_data_path: /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/validation/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_part10.h5
+    data_path: /sps/atlas/t/tpham/lemurs/fcceeallegro/LEMURS_FCCeeALLEGRO_training.h5
+    val_data_path: /sps/atlas/t/tpham/lemurs/fcceeallegro/testing/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_part10.h5
     batch_size: 1024
     xml_path: configs/binning_lemurs_fcceeallegro.xml
     xml_ptype: photon
@@ -72,21 +72,22 @@ data:
     dep_cut: 600
     # width_noise: 0.000005
     width_noise: 1e-5
-    fixed_noise: false
     shuffle: true
     num_workers: 2
     predict_batch_size: 1000
     eval_dataset: "1-photons"
     cache_mode: memmap
-    cache_dir: /pscratch/sd/p/pmtuan/caloinn_cache/fcceeallegro_newcache
+    cache_dir: /sps/atlas/t/tpham/cache/calogen/fcceeallegro
     cache_chunk: 10000
+    num_noise_doses: 2
 
 model:
   class_path: calogen.models.caloinn.lightning.CaloINNLightningModule
   init_args:
-    setup_data_sample_path:  /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_train.h5
-    max_init_samples: 20000
+    setup_data_sample_path: /sps/atlas/t/tpham/lemurs/fcceeallegro/LEMURS_FCCeeALLEGRO_training.h5
+    max_init_samples: 5000
     shuffle_init_batch: false
+    num_noise_doses: 2
     # width_noise: 0.000005
     width_noise: 1e-5
     custom_noise: false

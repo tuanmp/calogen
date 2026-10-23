@@ -30,7 +30,6 @@ class CaloINNDataModule(BaseDataModule, MemmapMixin):
         rew: float = 1.0,
         dep_cut: float = 1e10,
         width_noise: float = 0.0,
-        fixed_noise: bool = False,
         shuffle: bool = True,
         num_workers: int = 0,
         predict_batch_size: int = 1000,
@@ -39,6 +38,7 @@ class CaloINNDataModule(BaseDataModule, MemmapMixin):
         cache_dir: str = "",
         cache_chunk: int = 1024,
         predict_multiplier: int = 1,
+        num_noise_doses: int = 1,
         **kwargs,
     ):
         super().__init__(
@@ -60,11 +60,11 @@ class CaloINNDataModule(BaseDataModule, MemmapMixin):
         self.rew = rew
         self.dep_cut = dep_cut
         self.width_noise = width_noise
-        self.fixed_noise = fixed_noise
         self.eval_dataset = eval_dataset
         self.cache_mode = cache_mode
         self.cache_dir = cache_dir or "/tmp/caloinn_cache"
         self.cache_chunk = cache_chunk
+        self.num_noise_doses = num_noise_doses
 
         # Load layer boundaries once (shared across splits)
         xml_handler = XMLHandler(particle_name=xml_ptype, filename=xml_path)
@@ -114,15 +114,13 @@ class CaloINNDataModule(BaseDataModule, MemmapMixin):
         
         ds_kwargs = dict(
             layer_boundaries=self.layer_boundaries,
-            xml_filename=self.xml_path,
-            particle_type=self.xml_ptype,
             eps=self.eps, 
             u0up_cut=self.u0up_cut,
             u0low_cut=self.u0low_cut, 
             rew=self.rew, 
             dep_cut=self.dep_cut,
             width_noise=self.width_noise, 
-            fixed_noise=self.fixed_noise,
+            num_noise_doses=self.num_noise_doses
         )
         self._train_dataset = CaloINNDataset(
             source=train_source,
@@ -144,15 +142,13 @@ class CaloINNDataModule(BaseDataModule, MemmapMixin):
             source=val_source,
             indices=val_valid,
             layer_boundaries=self.layer_boundaries,
-            xml_filename=self.xml_path,
-            particle_type=self.xml_ptype,
             eps=self.eps,
             u0up_cut=self.u0up_cut,
             u0low_cut=self.u0low_cut,
             rew=self.rew,
             dep_cut=self.dep_cut,
             width_noise=0.0,
-            fixed_noise=False,
+            num_noise_doses=self.num_noise_doses,
         )
 
     def teardown(self, stage=None):

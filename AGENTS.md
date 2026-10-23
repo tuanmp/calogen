@@ -41,8 +41,10 @@ calogen/                # repo root
     base.py           GenerativeModel protocol + BaseGenerativeModule
       registry.py       name -> (LightningModule, DataModule) plugin lookup
       caloinn/          cinn, distributions, vblinear, blocks/, lightning,
-                        datamodule, classifier.py, features/ (convert, torch_hlf)
+                        datamodule, classifier.py, features/ (convert, representation)
       icaloflow/        model, lightning, datamodule, classifier.py
+    data/               model-agnostic: sources, io, data_util, hlf (HLF blocks +
+                        LEMURS lattice), preprocess, datasets/, datamodules/
     classifiers/        model-agnostic NCE base (base.py) + calibration.py
     eval/               LEMURS truth-vs-generated evaluation: io, observables,
                         metrics, plots, report (library + scripts CLI)
@@ -114,6 +116,17 @@ Imports are always `from calogen.<subpkg> import ...` (e.g.
 14. `calogen.eval` evaluation uses `threshold_mev` (e.g. `0.015`) to match the generator
     noise cut; pass it via `configs/eval/lemurs_base.yaml`. `configs/` is gitignored
     (environment-local).
+15. **CaloINN's internal representation is not a logit.** `preprocess` divides each
+    layer by its own energy (per-layer fractions summing to 1) and appends 45 extra
+    dims `[E_tot/E_inc, E_i/Σ_{j≥i}E_j, …]`; `core.postprocess.unnormalize_layers`
+    inverts that telescoping. The classifier converter has two reps
+    (`calogen.models.caloinn.features.convert`): `representation="internal"` builds
+    `[cells | E_inc | HLF]` straight from the generator vector (cells untouched, no
+    quantile mask, no voxel cut, no MeV round-trip), `"physical"` is the legacy
+    772-D CaloChallenge path. Per-layer fractional cells carry no absolute energy,
+    so the `layer_frac` HLF block is what tells the classifier the deposit — do not
+    drop it. All HLF blocks are energy-weighted means, so they can be computed on
+    fractional cells directly (`calogen.data.hlf`).
 
 ## Parity
 

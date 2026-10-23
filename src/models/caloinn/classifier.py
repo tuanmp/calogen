@@ -12,10 +12,7 @@ from functools import partial
 from typing import Optional
 
 import torch
-from calogen.classifiers import (
-    MLP,
-    NoiseContrastiveDensityRatioEstimator,
-)
+from calogen.classifiers import NoiseContrastiveDensityRatioEstimator
 from calogen.models.caloinn.features.convert import (
     cinn_sample_to_classifier_input_torch,
 )
@@ -43,6 +40,8 @@ class CaloINNCLF(NoiseContrastiveDensityRatioEstimator):
         generator_ckpt_path: str = None,
         voxel_energy_cutoff: float = None,
         log_transform: bool = False,
+        representation: str = "physical",
+        blocks: tuple = ("layer_frac", "cog", "width"),
         lr: float = 1e-3,
         step_size: int = 10,
         gamma: float = 0.95,
@@ -81,7 +80,9 @@ class CaloINNCLF(NoiseContrastiveDensityRatioEstimator):
             xml_path=self.generator.xml_path,
             particle=self.generator.xml_ptype,
             log_transform=log_transform,
-            voxel_energy_cutoff=voxel_energy_cutoff
+            voxel_energy_cutoff=voxel_energy_cutoff,
+            representation=representation,
+            blocks=blocks,
         )
 
         self.save_hyperparameters(ignore=["generator", "net", "convert_func", "metrics", "_val_y_hat", "_val_y", "_test_y_hat", "_test_y", "_val_z"])

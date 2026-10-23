@@ -1,8 +1,9 @@
 import os
-from typing import Tuple
+from typing import Any, Tuple
 
 import numpy as np
 import torch
+from calogen.core.caloch_eval import HighLevelFeatures as HLF
 from torch.utils.data import Dataset
 
 from .. import data_util
@@ -28,29 +29,25 @@ class CaloINNDataset(Dataset):
         source: HDF5Source | MemmapSource,
         indices: np.ndarray,
         layer_boundaries: np.ndarray,
-        xml_filename: str,
-        particle_type: str,
         eps: float = 1e-10,
         u0up_cut: float = 7.0,
         u0low_cut: float = 0.0,
         rew: float = 1.0,
         dep_cut: float = 1e10,
         width_noise: float = 0.0,
-        fixed_noise: bool = False,
+        num_noise_doses: int = 1,
     ):
         self.source = source
         self.indices = np.asarray(indices, dtype=np.int64)
         self.layer_boundaries = layer_boundaries
-        self.xml_filename = xml_filename
-        self.particle_type = particle_type
         self.eps = eps
         self.u0up_cut = u0up_cut
         self.u0low_cut = u0low_cut
         self.rew = rew
         self.dep_cut = dep_cut
         self.width_noise = width_noise
-        self.fixed_noise = fixed_noise
-
+        self.num_noise_doses = num_noise_doses
+        
     def __len__(self) -> int:
         return int(self.indices.shape[0])
 
@@ -111,21 +108,13 @@ class CaloINNDataset(Dataset):
         x = x.astype(np.float32, copy=False)
         c = c.astype(np.float32, copy=False)
 
-        # Add noise (matches legacy MyDataLoader)
+        # Add noise (matches legacy MyDataLoader).  ``x`` is freshly allocated
+        # by ``preprocess``, so the dose can be added in place; the float32 draw
+        # is ~35% cheaper than the legacy float64 one.
         if self.width_noise > 0:
-            if self.fixed_noise:
-                # Per-sample deterministic noise: each HDF5 index gets its
-                # own seeded RNG, making noise independent of batch composition.
-                noise = np.empty_like(x, dtype=np.float32)
-                for i, h5idx in enumerate(source_indices.astype(np.int64)):
-                    rng = np.random.RandomState(int(h5idx))
-                    noise[i] = rng.uniform(0, 1, x.shape[1:]).astype(np.float32)
-                noise *= self.width_noise
-                x += noise
-            else:
-                x = data_util.add_noise(x, self.width_noise)  # vectorised random noise
-                # added a second dose of noise here to check parity with a bug in legacy code
-                x = data_util.add_noise(x, self.width_noise)  # vectorised random noise
+            for _ in range(self.num_noise_doses):
+                x = data_util.add_noise(
+                    x, self.width_noise, copy=False, draw_dtype=np.float32
+                )
 
         return x, c
-

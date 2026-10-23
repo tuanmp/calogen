@@ -75,8 +75,6 @@ class CaloINNLightningModule(BaseGenerativeModule):
         init_data_x=None,
         init_data_c=None,
         init_layer_boundaries=None,
-        init_num_train_samples=None,
-        init_from_legacy_train_split=False,
         max_samples=None,
         actnorm_calibration_samples=None,
         subtract_predict_noise: bool=True,
@@ -87,6 +85,7 @@ class CaloINNLightningModule(BaseGenerativeModule):
         dataset_params=None,
         custom_noise=False,
         inspect_dimensions: list[int] = [0, 1, 2],
+        num_noise_doses: int = 1,
         **kwargs
     ):
         super().__init__()
@@ -213,9 +212,8 @@ class CaloINNLightningModule(BaseGenerativeModule):
             dep_cut=ds_params.get("dep_cut", 1.0e10),
         )
 
-        x = data_util.add_noise(x, self.width_noise)
-        # add a second dose of noise to check parity with a bug in legacy code
-        x = data_util.add_noise(x, self.width_noise)
+        for _ in range(self.hparams.get("num_noise_doses", 1)):
+            x = data_util.add_noise(x, self.width_noise)
 
         dtype = torch.get_default_dtype()
         x = torch.tensor(x, dtype=dtype)

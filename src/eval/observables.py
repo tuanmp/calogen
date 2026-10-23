@@ -7,16 +7,18 @@ from typing import Callable
 import numpy as np
 
 from calogen.core.caloch_eval.HighLevelFeatures import HighLevelFeatures
-
-N_LAYERS, N_R, N_PHI = 45, 9, 16
-CELLS_PER_LAYER = N_R * N_PHI
-R_EDGES = np.arange(0, 46, 5)
-R_MID = 0.5 * (R_EDGES[:-1] + R_EDGES[1:])
-PHI_EDGES = np.linspace(-np.pi, np.pi, N_PHI + 1)
-PHI_MID = 0.5 * (PHI_EDGES[:-1] + PHI_EDGES[1:])
-# r-major within-layer coordinates (index = r * N_PHI + phi)
-X_V = (R_MID[:, None] * np.cos(PHI_MID[None, :])).reshape(-1)
-Y_V = (R_MID[:, None] * np.sin(PHI_MID[None, :])).reshape(-1)
+from calogen.data.hlf import (
+    CELLS_PER_LAYER,
+    N_LAYERS,
+    N_PHI,
+    N_R,
+    PHI_EDGES,
+    PHI_MID,
+    R_EDGES,
+    R_MID,
+    X_V,
+    Y_V,
+)
 
 
 @dataclass

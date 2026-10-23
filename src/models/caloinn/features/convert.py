@@ -1,15 +1,17 @@
 """CINN internal representation → classifier input conversion.
 
-Replicates the preprocessing pipeline from ``caloxtreme_clf`` so that
-CINN-generated showers can be fed to the ported classifier for density
-ratio estimation during MCMC.
+Two representations are supported, selected with ``representation=``:
 
-The pipeline replicates:
-1. ``data_util.postprocess`` — CINN internal (730D) → physical layers (GeV)
-2. Convert to MeV for HLF computation
-3. ``scale_shower`` — energy-normalised cells + energy in GeV
-4. ``get_high_level_features`` — 51 physics-motivated features
-5. Concatenate into 772D classifier input
+``"internal"`` (native to CaloINN)
+    ``[cells | extra_dims]`` -> ``[cells | E_inc | HLF]``.  The cells are
+    per-layer fractional deposits and are passed through untouched; the
+    high-level features are energy-weighted means computed directly on them,
+    so no energy rescaling, quantile masking or voxel cut happens.  Generator
+    defects survive into the classifier input, which is the point.
+
+``"physical"`` (legacy, CaloChallenge)
+    Replicates the ``caloxtreme_clf`` pipeline: ``postprocess`` -> MeV ->
+    ``scale_shower`` -> 51 XML-geometry features -> 772D concat.
 """
 
 from __future__ import annotations
@@ -20,12 +22,9 @@ import torch
 from calogen.core import data_util
 from calogen.core import postprocess as torch_postprocess
 from calogen.core.caloch_eval.HighLevelFeatures import HighLevelFeatures
-from calogen.models.caloinn.features.torch_hlf import (
-    compute_hlf_torch,
-    get_hlf_constants,
-    scale_shower_torch,
-    voxel_cutoff_torch,
-)
+from calogen.data.hlf import compute_hlf_xml_geometry, get_hlf_constants
+from calogen.data.preprocess import scale_shower_torch, voxel_cutoff_torch
+from calogen.models.caloinn.features.representation import internal_to_classifier_input
 
 
 def _compute_hlf(
@@ -126,8 +125,10 @@ def cinn_sample_to_classifier_input(
     particle: str,
     log_transform: bool = False,
     voxel_energy_cutoff: float | None = None,
+    representation: str = "physical",
+    blocks: tuple[str, ...] = ("layer_frac", "cog", "width"),
 ) -> np.ndarray:
-    """Convert CINN internal representation to 772D classifier input.
+    """Convert CINN internal representation to classifier input.
 
     Replicates the full ``_preprocess_batch`` pipeline from the
     classifier's ``LargeHDF5MLPDataModule``, including optional
@@ -143,26 +144,38 @@ def cinn_sample_to_classifier_input(
     layer_boundaries : list[int]
         Cumulative cell indices defining layer boundaries.
     q : torch.Tensor
-        Quantile thresholds for postprocessing.
+        Quantile thresholds for postprocessing (``"physical"`` only).
     width_noise : float
-        Uniform noise width subtracted before postprocessing.
+        Uniform noise width subtracted before postprocessing
+        (``"physical"`` only).
     xml_path : str
-        Path to the XML binning file.
+        Path to the XML binning file (``"physical"`` only).
     particle : str
-        Particle name matching the XML (e.g. "pion").
+        Particle name matching the XML, e.g. "pion" (``"physical"`` only).
     log_transform : bool
-        If True, apply ``np.log1p`` to energy-normalised cells.
-        Must match the classifier's training config.
+        Apply ``log1p`` to the shower block.  Must match the classifier's
+        training config.
     voxel_energy_cutoff : float, optional
-        Zero out cells below this MeV threshold before HLF computation.
-        Must match the classifier's training config.
+        Zero out cells below this MeV threshold before HLF computation
+        (``"physical"`` only).
+    representation : {"physical", "internal"}
+        Which classifier-input representation to build.  ``"internal"``
+        ignores ``q``, ``width_noise``, ``xml_path``, ``particle`` and
+        ``voxel_energy_cutoff``.
+    blocks : tuple of str
+        High-level feature blocks for the ``"internal"`` representation, see
+        :data:`calogen.data.hlf.BLOCKS`.
 
     Returns
     -------
-    np.ndarray  shape (N, 772)
-        Classifier input: [X_proc(720), cond_proc(1), X_hlf(51)].
-        Ready to be fed to ``ClassifierWrapper.forward()``.
+    np.ndarray
+        ``"physical"``: shape (N, 772), ``[X_proc(720), cond_proc(1), X_hlf(51)]``.
+        ``"internal"``: shape (N, cells + 1 + hlf_cols).
     """
+    if representation not in ("physical", "internal"):
+        raise ValueError(
+            f"representation must be 'physical' or 'internal', got {representation!r}"
+        )
     # Convert torch → numpy if needed
     if isinstance(x_internal, torch.Tensor):
         x_np = x_internal.cpu().numpy().copy()
@@ -178,6 +191,16 @@ def cinn_sample_to_classifier_input(
         x_np = x_np.reshape(1, -1)
     if c_np.ndim == 1:
         c_np = c_np.reshape(-1, 1)
+
+    if representation == "internal":
+        # CaloINN-native path: the cells are already the representation we want.
+        return internal_to_classifier_input(
+            torch.as_tensor(x_np, dtype=torch.float32),
+            torch.as_tensor(c_np, dtype=torch.float32),
+            layer_boundaries,
+            blocks=blocks,
+            log_transform=log_transform,
+        ).numpy()
 
     # Step 1: Subtract width noise (matches predict_step / generate_single_energy)
     x_np = x_np - width_noise
@@ -232,6 +255,8 @@ def cinn_sample_to_classifier_input_torch(
     particle: str,
     log_transform: bool = False,
     voxel_energy_cutoff: float | None = None,
+    representation: str = "physical",
+    blocks: tuple[str, ...] = ("layer_frac", "cog", "width"),
 ) -> torch.Tensor:
     """Fully GPU-native variant of ``cinn_sample_to_classifier_input``.
 
@@ -250,17 +275,42 @@ def cinn_sample_to_classifier_input_torch(
     layer_boundaries : list[int]
     q : torch.Tensor
         Per-cell quantile thresholds (on the same device as x_internal).
+        Unused when ``representation="internal"``.
     width_noise : float
+        Unused when ``representation="internal"``.
     xml_path : str
+        Unused when ``representation="internal"``.
     particle : str
+        Unused when ``representation="internal"``.
     log_transform : bool
     voxel_energy_cutoff : float, optional
+        Unused when ``representation="internal"``.
+    representation : {"physical", "internal"}
+        ``"internal"`` builds ``[cells | E_inc | HLF]`` straight from the
+        generator's per-layer fractional cells.
+    blocks : tuple of str
+        Feature blocks for the ``"internal"`` representation.
 
     Returns
     -------
-    torch.Tensor  shape (N, 772)
-        Classifier input tensor on the same device as ``x_internal``.
+    torch.Tensor
+        ``"physical"``: shape (N, 772).  ``"internal"``: shape
+        (N, cells + 1 + hlf_cols), on the same device as ``x_internal``.
     """
+    if representation not in ("physical", "internal"):
+        raise ValueError(
+            f"representation must be 'physical' or 'internal', got {representation!r}"
+        )
+
+    if representation == "internal":
+        return internal_to_classifier_input(
+            x_internal,
+            c,
+            layer_boundaries,
+            blocks=blocks,
+            log_transform=log_transform,
+        )
+
     device = x_internal.device
 
     # Step 1: Subtract width noise
@@ -288,7 +338,7 @@ def cinn_sample_to_classifier_input_torch(
     X_mev = voxel_cutoff_torch(X_mev, voxel_energy_cutoff)
 
     # High-level features (on GPU, geometry constants cached)
-    X_hlf = compute_hlf_torch(X_mev, hlf_consts)  # (N, 51)
+    X_hlf = compute_hlf_xml_geometry(X_mev, hlf_consts)  # (N, 51)
 
     # Scale shower (energy-normalise, MeV → GeV)
     X_proc, cond_proc = scale_shower_torch(X_mev, Einc_mev)  # (N, 720), (N, 1)
