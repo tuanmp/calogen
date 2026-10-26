@@ -1,3 +1,3 @@
-from calogen.sampler.ar_sampler import WhitenedNCESampler
+from calogen.sampler.ar_sampler import InternalShowerSampler, WhitenedNCESampler
 
-__all__ = ["WhitenedNCESampler"]
+__all__ = ["WhitenedNCESampler", "InternalShowerSampler"]

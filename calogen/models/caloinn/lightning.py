@@ -8,17 +8,18 @@ import h5py
 import lightning as pl
 import numpy as np
 import torch
+from lightning.pytorch.utilities.rank_zero import rank_zero_info
+from matplotlib import pyplot as plt
+from scipy import stats
+from sklearn.metrics import brier_score_loss
+from torchmetrics import AUROC, MetricCollection
+
 from calogen.core import data_util
 from calogen.core import postprocess as torch_postprocess
 from calogen.core.diagnostics import TrainingDiagnostics
 from calogen.core.plotting import plot_latent_histo
 from calogen.models.base import BaseGenerativeModule
 from calogen.models.caloinn.cinn import CINN
-from lightning.pytorch.utilities.rank_zero import rank_zero_info
-from matplotlib import pyplot as plt
-from scipy import stats
-from sklearn.metrics import brier_score_loss
-from torchmetrics import AUROC, MetricCollection
 
 
 class _SkipLastTwoScheduler:
@@ -540,7 +541,7 @@ class CaloINNLightningModule(BaseGenerativeModule):
         samples, t = self.conditional_generate(c, measure_gen_time=True)
         # self.log("predict_gen_time", t / c.shape[0], on_step=False, on_epoch=True, prog_bar=True, batch_size=c.shape[0])
         if self.subtract_predict_noise:
-            samples = samples - self.width_noise
+            samples = samples - self.width_noise * self.hparams.get("num_noise_doses", 1)  # Remove noise added during preprocessing
         samples = samples[:, 0, ...]
         data = torch_postprocess.postprocess(
             samples,
@@ -613,7 +614,7 @@ class CaloINNLightningModule(BaseGenerativeModule):
             samples[start:stop] = self.model.sample(1, energies[start:stop])
 
         samples = samples[:, 0, ...]
-        samples = samples - self.width_noise
+        samples = samples - self.width_noise * self.hparams.get("num_noise_doses", 1)  # Remove noise added during preprocessing
 
         data = torch_postprocess.postprocess(
             samples, energies,
@@ -719,7 +720,7 @@ class CaloINNLightningModule(BaseGenerativeModule):
             cinn_sample_to_classifier_input,
             layer_boundaries=self.layer_boundaries,
             q=self.q,
-            width_noise=self.width_noise,
+            width_noise=self.width_noise * self.hparams.get("num_noise_doses", 1),
             xml_path=self.hparams.xml_path,
             particle=self.hparams.xml_ptype,
             log_transform=log_transform,
@@ -755,7 +756,7 @@ class CaloINNLightningModule(BaseGenerativeModule):
         )
 
         # Subtract width noise (matches generate_single_energy)
-        samples = torch.from_numpy(samples_np - self.width_noise).to(device)
+        samples = torch.from_numpy(samples_np - self.width_noise * self.hparams.get("num_noise_doses", 1)).to(device)
         energies = torch.from_numpy(energies_np).to(device)
 
         data = torch_postprocess.postprocess(
@@ -849,7 +850,7 @@ class CaloINNLightningModule(BaseGenerativeModule):
         dict
             Postprocessed data with ``"energy"`` and ``"layer_*"`` keys.
         """
-        samples = decoded - self.width_noise
+        samples = decoded - self.width_noise * self.hparams.get("num_noise_doses", 1)
         data = torch_postprocess.postprocess(
             samples, energies,
             layer_boundaries=self.layer_boundaries,
@@ -927,12 +928,12 @@ class CaloINNLightningModule(BaseGenerativeModule):
 
         samples = samples[:, 0, ...].cpu().numpy()
         energies_np = energies.cpu().numpy()
-        samples -= self.width_noise
+        samples -= self.width_noise * self.hparams.get("num_noise_doses", 1)  # Remove noise added during preprocessing
 
         data = data_util.postprocess(
             samples, energies_np,
             layer_boundaries=self.layer_boundaries,
-            threshold=self.width_noise,
+            threshold=self.width_noise * self.hparams.get("num_noise_doses", 1),
             quantiles=self.q.detach().cpu().numpy(),
         )
 

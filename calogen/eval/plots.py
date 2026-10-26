@@ -88,6 +88,7 @@ def plot_score_histo(
     title: str = "Score Distribution",
     xlabel: str = "Score",
     ylabel: str = "Frequency",
+    log_scale: bool = False,
     save_path: Path | str | None = None
 ):
     """
@@ -100,6 +101,8 @@ def plot_score_histo(
         title (str): Title of the plot.
         xlabel (str): Label for the x-axis.
         ylabel (str): Label for the y-axis.
+        log_scale (bool): Whether to use a logarithmic scale for the y-axis.
+        save_path (Path | str | None): Path to save the plot.
     """
     fig, ax = plt.subplots(figsize=default_single_fig_size)
     unique_labels = np.unique(labels, sorted=True)
@@ -110,6 +113,8 @@ def plot_score_histo(
     ax.set_title(title)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
+    if log_scale:
+        ax.set_yscale('log')
     ax.legend()
     ax.grid(True)
     plt.tight_layout()
@@ -119,7 +124,7 @@ def plot_score_histo(
 def plot_calibration(
     scores: np.ndarray,
     labels: np.ndarray,
-    bins: int = 10,
+    bins: int = 50,
     title: str = "Calibration Plot",
     xlabel: str = "Predicted Probability",
     ylabel: str = "Observed Frequency",

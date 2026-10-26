@@ -76,7 +76,7 @@ def internal_to_classifier_input(
     layer_boundaries: Sequence[int],
     blocks: Iterable[str] = DEFAULT_BLOCKS,
     log_transform: bool = False,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Build the classifier input straight from CaloINN's internal samples.
 
     The cells are passed through untouched -- they are already per-layer
@@ -119,4 +119,4 @@ def internal_to_classifier_input(
     if c.ndim == 1:
         c = c.reshape(-1, 1)
 
-    return torch.cat([cells, c, hlf], dim=1)
+    return cells, c, hlf

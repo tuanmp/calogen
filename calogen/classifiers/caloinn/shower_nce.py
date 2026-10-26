@@ -73,6 +73,7 @@ class InternalShowerNCE(NoiseContrastiveDensityRatioEstimator, GeneratorMixin):
             amsgrad=amsgrad,
         )
         self.generator = generator
+        self.generator.eval()  # Ensure generator is in eval mode during classifier training
 
         self.convert_func = partial(
             internal_to_classifier_input,
@@ -86,7 +87,8 @@ class InternalShowerNCE(NoiseContrastiveDensityRatioEstimator, GeneratorMixin):
     def get_input_from_batch(self, batch):
 
         x_truth, c = batch
-        x_gen = self.generator.conditional_generate(c, measure_gen_time=False).squeeze(1)
+        with torch.no_grad():
+            x_gen = self.generator.conditional_generate(c, measure_gen_time=False).squeeze(1)
 
         y_truth = torch.ones(x_truth.shape[0], 1, device=x_truth.device)
         y_gen = torch.zeros(x_gen.shape[0], 1, device=x_gen.device)
@@ -95,7 +97,7 @@ class InternalShowerNCE(NoiseContrastiveDensityRatioEstimator, GeneratorMixin):
         y = torch.cat([y_truth, y_gen], dim=0)
         c = c.repeat(2, 1)
 
-        X_input = self.convert_func(X, c)
+        X_input = torch.concat(self.convert_func(X, c), dim=1)
 
         return X_input, y, None
 
@@ -109,10 +111,54 @@ class InternalShowerNCE(NoiseContrastiveDensityRatioEstimator, GeneratorMixin):
         c : torch.Tensor shape (N, C)
             Conditioning variables corresponding to each sample x.
         """
-        x_clf = self.convert_func(x, c)
-        logits = self.forward(x_clf).squeeze(-1)  # shape (N,)
+        logits = self.forward(torch.concat(self.convert_func(x, c), dim=1)).squeeze(-1)  # shape (N,)
         return torch.exp(logits)  # r(x,c) = p(x|c)/q(x|c) = exp(logit)
 
+class HLFShowerNCE(InternalShowerNCE):
+    """CaloINN shower-space classifier for density-ratio estimation.
+
+    Loads a pre-trained CaloINN generator and trains an MLP to separate truth
+    showers (label 1) from generator samples (label 0) in high-level-feature
+    space.
+
+    Uses calogen.data.datasets.caloinn.CaloINNDataset to load raw shower and preprocess. Return shower (x) and conditions (c).
+    Generate training samples using the same conditions with CaloINN generator. 
+    Compute high-level features for both truth and gen samples. These include layer fractions, center of gravity, and shower width.
+    Train a binary classifier to distinguish between truth and gen samples in the high-level feature space.
+    """
+
+    def get_input_from_batch(self, batch):
+    
+        x_truth, c = batch
+        with torch.no_grad():
+            x_gen = self.generator.conditional_generate(c, measure_gen_time=False).squeeze(1)
+
+        y_truth = torch.ones(x_truth.shape[0], 1, device=x_truth.device)
+        y_gen = torch.zeros(x_gen.shape[0], 1, device=x_gen.device)
+
+        X = torch.cat([x_truth, x_gen], dim=0)
+        y = torch.cat([y_truth, y_gen], dim=0)
+        c = c.repeat(2, 1)
+
+        cells, c, hlf = self.convert_func(X, c)
+
+        X_input = torch.concat([hlf, c], dim=1)
+
+        return X_input, y, None
+
+    def estimate_density_ratio(self, x, c):
+        """Estimate the density ratio p(x|c) / q(x|c) using the trained classifier.
+
+        Parameters
+        ----------
+        x : torch.Tensor shape (N, D)
+            Samples from the proposal distribution q(x|c).
+        c : torch.Tensor shape (N, C)
+            Conditioning variables corresponding to each sample x.
+        """
+        cells, c, hlf = self.convert_func(x, c)
+        logits = self.forward(torch.concat([hlf, c], dim=1)).squeeze(-1)  # shape (N,)
+        return torch.exp(logits)  # r(x,c) = p(x|c)/q(x|c) = exp(logit)
 
 # class CaloINNLatentNCE(NoiseContrastiveDensityRatioEstimator):
 #     """Latent-space NCE density-ratio estimator over the CaloINN latent."""

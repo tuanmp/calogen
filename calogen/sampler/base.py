@@ -64,7 +64,7 @@ class BaseSampler:
         assert data_module.test_dataloader() is not None, "No test dataloader found. Please check your data module."
         return data_module
 
-    def collect_conditions(self, loader: str = "test"):
+    def collect_conditions(self, loader: str = "test", max_samples: int | None = None) -> torch.Tensor:
         """Collect conditions from the dataloader."""
         match loader:
             case "train":
@@ -77,7 +77,12 @@ class BaseSampler:
                 raise ValueError(f"Unknown loader type: {loader}. Must be one of 'train', 'val', or 'test'.")
         conditions = []
         for batch in tqdm(dataloader, desc=f"Collecting conditions from {loader} dataloader"):
-            c = batch["c"]
+            if isinstance(batch, (list, tuple)):
+                c = batch[1]
+            elif isinstance(batch, dict):
+                c = batch["c"]
             conditions.append(c)
+            if max_samples is not None and sum(len(c) for c in conditions) >= max_samples:
+                break
         return torch.cat(conditions, dim=0)
 

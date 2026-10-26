@@ -533,23 +533,12 @@ class RationalQuadraticSplineBlock(fm.InvertibleModule):
             c = - input_delta * (inputs - input_cumheights)
 
             discriminant = b.pow(2) - 4 * a * c
-            
-            ######################################################################
-            # Mini-Debug terminal
-            if not (discriminant >= 0).all():
-                print(f"{discriminant=}, \n {a=}, \n {b=}, \n {c=}, \n {theta=}")
-                while True:
-                    inp = input()
-                    print(inp)
-                    if inp=="break":
-                        break
-                    try:
-                        print(eval(inp), flush=True)
-                    except:
-                        print("Cannot do this", flush=True)
-            #######################################################################
-            
-            assert (discriminant >= 0).all()
+            # Numerical guard: float32 round-off (and inputs pushed into the
+            # spline's degenerate region by out-of-distribution latents) can
+            # make the quadratic discriminant slightly negative.  This used to
+            # enter an interactive debug terminal, which raised EOFError and
+            # crashed every non-interactive run that hit it.
+            discriminant = discriminant.clamp_min(0.0)
 
             root = (2 * c) / (-b - torch.sqrt(discriminant))
             outputs = root * input_bin_widths + input_cumwidths

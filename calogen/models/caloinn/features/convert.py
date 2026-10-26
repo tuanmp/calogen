@@ -194,13 +194,14 @@ def cinn_sample_to_classifier_input(
 
     if representation == "internal":
         # CaloINN-native path: the cells are already the representation we want.
-        return internal_to_classifier_input(
+        cells, c_out, hlf = internal_to_classifier_input(
             torch.as_tensor(x_np, dtype=torch.float32),
             torch.as_tensor(c_np, dtype=torch.float32),
             layer_boundaries,
             blocks=blocks,
             log_transform=log_transform,
-        ).numpy()
+        )
+        return torch.cat([cells, c_out, hlf], dim=1).numpy()
 
     # Step 1: Subtract width noise (matches predict_step / generate_single_energy)
     x_np = x_np - width_noise
@@ -303,13 +304,14 @@ def cinn_sample_to_classifier_input_torch(
         )
 
     if representation == "internal":
-        return internal_to_classifier_input(
+        cells, c_out, hlf = internal_to_classifier_input(
             x_internal,
             c,
             layer_boundaries,
             blocks=blocks,
             log_transform=log_transform,
         )
+        return torch.cat([cells, c_out, hlf], dim=1)
 
     device = x_internal.device
 

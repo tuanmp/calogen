@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import torch
+
 from calogen.models.caloinn.lightning import CaloINNLightningModule
 from calogen.sampler.base import BaseSampler
 
@@ -66,6 +67,55 @@ class WhitenedNCESampler(BaseSampler):
         sample_dict["shower"] = shower
         return sample_dict
 
+
+class InternalShowerSampler(BaseSampler):
+    def __init__(self, config: str | Path, model_path: str | Path, device: str = "cuda"):
+        super().__init__(config, model_path, device)
+
+    @torch.inference_mode()
+    def sample(self, c: torch.Tensor, Z: float, eval_mode: bool = False):
+        """Sample from the generator given conditions c."""
+        if eval_mode:
+            self.model.eval()
+        else:
+            self.model.train()
+        num_samples = c.shape[0]
+        # z = self.model.sample_latent(num_samples).to(c.device)
+        x_gen = self.model.generator.conditional_generate(c, measure_gen_time=False).squeeze(1)
+        density_ratio = self.model.estimate_density_ratio(x_gen, c)
+        logits = torch.log(density_ratio)
+        survival_prob = torch.clamp(density_ratio, max=Z) / Z
+        mask = torch.rand(num_samples, device=c.device) < survival_prob.squeeze()
+
+        return {
+            "x_gen": x_gen,
+            "c": c,
+            "logits": logits,
+            "survival_prob": survival_prob,
+            "mask": mask,
+        }
+
+    @torch.inference_mode()
+    def decode(self, x_gen: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+        """Decode generator latents ``x_gen`` at conditions ``c`` to flat showers."""
+        data = self.model.generator.post_process_decoded(x_gen, c)
+        num_layers = len(self.model.generator.layer_boundaries) - 1
+        return torch.cat([data[f"layer_{i}"] for i in range(num_layers)], dim=1)
+
+    @torch.inference_mode()
+    def sample_and_decode(self, c: torch.Tensor, Z: float, eval_mode: bool = False):
+        """Sample from the generator given conditions c and decode to original space."""
+        sample_dict = self.sample(c, Z, eval_mode)
+        mask = sample_dict["mask"]
+        x_gen = sample_dict["x_gen"][mask]
+        c = sample_dict["c"][mask]
+        if mask.sum() == 0:
+            shower = None
+        else:
+            shower = self.decode(x_gen, c)
+
+        sample_dict["shower"] = shower
+        return sample_dict
 
 if __name__ == "__main__":
     import argparse
