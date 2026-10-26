@@ -201,33 +201,37 @@ def test_compute_hlf_shape_and_names():
 def test_internal_input_passes_cells_through_untouched():
     x = _internal_batch(n=4, seed=7)
     c = torch.linspace(1.0, 4.0, 4).reshape(-1, 1)
-    out = internal_to_classifier_input(x, c, BOUNDARIES, blocks=("layer_frac", "cog", "width"))
+    cells_out, c_out, hlf = internal_to_classifier_input(
+        x, c, BOUNDARIES, blocks=("layer_frac", "cog", "width")
+    )
 
     n_cells = N_LAYERS * CELLS_PER_LAYER
-    assert out.shape == (4, n_cells + 1 + 5 * N_LAYERS)
-    assert torch.equal(out[:, :n_cells], x[:, :n_cells])  # no transformation
-    assert torch.equal(out[:, n_cells], c[:, 0])
+    assert cells_out.shape == (4, n_cells)
+    assert torch.equal(cells_out, x[:, :n_cells])  # no transformation
+    assert c_out.shape == (4, 1)
+    assert torch.equal(c_out, c)
+    assert hlf.shape == (4, 5 * N_LAYERS)
 
     cells, extra = split_internal(x, N_LAYERS)
     expected = compute_hlf(
         cells, BOUNDARIES, layer_frac=layer_fractions(extra)
     )
-    assert torch.allclose(out[:, n_cells + 1:], expected)
+    assert torch.allclose(hlf, expected)
 
 
 def test_internal_input_without_deposit_block_is_shorter():
     x = _internal_batch(n=3, seed=8)
     c = torch.full((3, 1), 5.0)
-    out = internal_to_classifier_input(x, c, BOUNDARIES, blocks=("cog", "width"))
-    assert out.shape[1] == N_LAYERS * CELLS_PER_LAYER + 1 + 4 * N_LAYERS
+    _, _, hlf = internal_to_classifier_input(x, c, BOUNDARIES, blocks=("cog", "width"))
+    assert hlf.shape[1] == 4 * N_LAYERS
 
 
 def test_internal_input_log_transform_stays_finite_with_negative_cells():
     x = _internal_batch(n=2, seed=9)
     x[:, 0] = -5.0  # pathological generator output
     c = torch.full((2, 1), 5.0)
-    out = internal_to_classifier_input(x, c, BOUNDARIES, log_transform=True)
-    assert torch.isfinite(out).all()
+    cells_out, _, _ = internal_to_classifier_input(x, c, BOUNDARIES, log_transform=True)
+    assert torch.isfinite(cells_out).all()
 
 
 def test_convert_representation_switch():

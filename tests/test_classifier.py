@@ -14,7 +14,7 @@ import torch
 
 torch.set_default_dtype(torch.float32)
 
-from calogen.classifiers.base import MLP, NCEClassifier, NoiseContrastiveDensityRatioEstimator
+from calogen.classifiers.base import MLP, Classifier, NoiseContrastiveDensityRatioEstimator
 from calogen.models.caloinn.features.convert import (
     _apply_voxel_cutoff,
     _compute_hlf,
@@ -99,7 +99,7 @@ def test_nce_base_is_generator_free():
 
 def test_nce_classifier_requires_get_input():
     with pytest.raises(NotImplementedError):
-        NCEClassifier(hidden_dim=8, num_layers=1).get_input_from_batch((torch.randn(2, 3),))
+        Classifier(hidden_dim=8, num_layers=1).get_input_from_batch((torch.randn(2, 3),))
 
 
 # ---------------------------------------------------------------------------
