@@ -21,6 +21,9 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import brier_score_loss
 from torchmetrics import AUROC, CalibrationError, MetricCollection
+from torchmetrics.utilities import rank_zero_info
+
+from calogen.sampler.base import _class_from_str
 
 
 class MLP(nn.Module):
@@ -215,6 +218,20 @@ class Classifier(pl.LightningModule):
         self.log('test_brier', brier_score_loss(y_all, y_hat_all), on_epoch=True, prog_bar=True, logger=True)
         self._test_y_hat.clear()
         self._test_y.clear()
+
+class GeneratorMixin:
+
+    @staticmethod
+    def load_generator(generator_class: pl.LightningModule, checkpoint_path: str, kwargs_override: Optional[dict] = None) -> pl.LightningModule:
+        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        hparams = ckpt["hyper_parameters"]
+        if kwargs_override:
+            hparams.update(kwargs_override)
+        generator = generator_class(**hparams)
+        generator.load_state_dict(ckpt["state_dict"])
+        weight_keys = [k for k in ckpt["state_dict"] if "weight" in k]
+        assert (generator.state_dict()[weight_keys[0]] == ckpt["state_dict"][weight_keys[0]]).all(), "Generator weights do not match checkpoint."
+        return generator
 
 
 

@@ -16,10 +16,10 @@ from lightning.pytorch.utilities.rank_zero import rank_zero_info
 
 from ...models.caloinn.features.representation import internal_to_classifier_input
 from ...models.caloinn.lightning import CaloINNLightningModule
-from ..base import NoiseContrastiveDensityRatioEstimator
+from ..base import GeneratorMixin, NoiseContrastiveDensityRatioEstimator
 
 
-class InternalShowerNCE(NoiseContrastiveDensityRatioEstimator):
+class InternalShowerNCE(NoiseContrastiveDensityRatioEstimator, GeneratorMixin):
     """CaloINN shower-space classifier for density-ratio estimation.
 
     Loads a pre-trained CaloINN generator and trains an MLP to separate truth
@@ -55,7 +55,8 @@ class InternalShowerNCE(NoiseContrastiveDensityRatioEstimator):
         rank_zero_info(f"🔄 Loading generator from {generator_ckpt_path}")
         # Build the generator BEFORE the classifier net so the RNG order matches
         # the original implementation (generator init, then MLP init).
-        generator = CaloINNLightningModule.load_from_checkpoint(generator_ckpt_path, **kw_overrides)
+        # generator = CaloINNLightningModule.load_from_checkpoint(generator_ckpt_path, **kw_overrides)
+        generator = self.load_generator(CaloINNLightningModule, generator_ckpt_path, kw_overrides)
         rank_zero_info(f"   ✅ Generator loaded. Model has {sum(p.numel() for p in generator.parameters())} parameters.")
 
         super().__init__(

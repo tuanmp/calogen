@@ -1,7 +1,9 @@
 
 
 
+import torch
 import yaml
+
 from calogen.sampler.base import _class_from_str
 
 
@@ -13,7 +15,10 @@ def initialize_gen(config, checkpoint, device):
     model_class_path = cfg["model"]["class_path"]
     model_class = _class_from_str(model_class_path)
     print(f"Loading model from {checkpoint}...")
-    model = model_class.load_from_checkpoint(checkpoint, **cfg["model"]["init_args"])
+    # model = model_class.load_from_checkpoint(checkpoint, weights_only=True, strict=False, **cfg["model"]["init_args"])
+    model = model_class(**cfg["model"]["init_args"])
+    sd = torch.load(checkpoint, map_location=device, weights_only=True)
+    model.load_state_dict(sd["state_dict"], strict=False)
     model.to(device)
     model.setup(stage="val")
 

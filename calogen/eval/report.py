@@ -104,7 +104,7 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
             continue
 
         bins = _bins_for(obs, ref, list(gen_vals.values()))
-        bins_plot = _bins_for(obs, ref, list(gen_vals.values()), robust=True)
+        bins_plot = _bins_for(obs, ref, [], robust=True)
         for g in gens:
             records += distribution_metrics(ref, gen_vals[g.label], name, bins,
                                             obs.per_layer, N_LAYERS, generator=g.label)
