@@ -1,4 +1,5 @@
 import numpy as np
+
 from calogen.core.xml_handler import XMLHandler
 from calogen.data.data_util import TruthFormat
 
@@ -147,7 +148,7 @@ class CaloINNDataModule(BaseDataModule, MemmapMixin):
             u0low_cut=self.u0low_cut,
             rew=self.rew,
             dep_cut=self.dep_cut,
-            width_noise=0.0,
+            width_noise=self.width_noise,
             num_noise_doses=self.num_noise_doses,
         )
 

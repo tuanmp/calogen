@@ -25,7 +25,7 @@ dependencies = [
     "torchmetrics>=1.0",
     "tqdm",
     "wandb>=0.24.2",
-    "seaborn"
+    "seaborn",
 ]
 
 [dependency-groups]

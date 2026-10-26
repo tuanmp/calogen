@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
@@ -9,6 +10,7 @@ from matplotlib import pyplot as plt
 
 _DUP = lambda a: np.append(a, a[-1])
 
+default_single_fig_size = (8, 6)
 
 def set_style() -> None:
     plt.rcParams.update({
@@ -70,8 +72,87 @@ def hist_with_ratio(ref, gens: Dict[str, np.ndarray], bins, xlabel,
     return fig
 
 
-def save_fig(fig, path: str, close: bool = True) -> None:
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
+def save_fig(fig, path: str | Path, close: bool = True) -> None:
+    if isinstance(path, str):
+        path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     if close:
         plt.close(fig)
+
+def plot_score_histo(
+    scores: np.ndarray,
+    labels: np.ndarray,
+    bins: int = 50,
+    title: str = "Score Distribution",
+    xlabel: str = "Score",
+    ylabel: str = "Frequency",
+    save_path: Path | str | None = None
+):
+    """
+    Plots a histogram of scores with different colors for each label.
+
+    Args:
+        scores (np.ndarray): Array of scores.
+        labels (np.ndarray): Array of labels corresponding to the scores.
+        bins (int): Number of bins for the histogram.
+        title (str): Title of the plot.
+        xlabel (str): Label for the x-axis.
+        ylabel (str): Label for the y-axis.
+    """
+    fig, ax = plt.subplots(figsize=default_single_fig_size)
+    unique_labels = np.unique(labels, sorted=True)
+
+    for label in unique_labels:
+        ax.hist(scores[labels == label], bins=bins, range=(0,1), alpha=0.5, label=f'y = {label}', density=True)
+
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.legend()
+    ax.grid(True)
+    plt.tight_layout()
+    if save_path:
+        save_fig(fig, save_path)
+
+def plot_calibration(
+    scores: np.ndarray,
+    labels: np.ndarray,
+    bins: int = 10,
+    title: str = "Calibration Plot",
+    xlabel: str = "Predicted Probability",
+    ylabel: str = "Observed Frequency",
+    save_path: Path | str | None = None
+):
+    """
+    Plots a calibration curve comparing predicted probabilities to observed frequencies.
+
+    Args:
+        scores (np.ndarray): Array of predicted probabilities.
+        labels (np.ndarray): Array of true labels (0 or 1).
+        bins (int): Number of bins for the calibration plot.
+        title (str): Title of the plot.
+        xlabel (str): Label for the x-axis.
+        ylabel (str): Label for the y-axis.
+    """
+    score_histo, bin_edges = np.histogram(scores, bins=bins, range=(0, 1))
+    true_histo, _ = np.histogram(scores[labels == 1], bins=bin_edges)
+
+    predicted_prob = (bin_edges[:-1] + bin_edges[1:]) / 2
+    observed_freq = np.divide(true_histo, score_histo, out=np.zeros_like(true_histo, dtype=float), where=score_histo != 0)
+
+    fig, ax = plt.subplots(figsize=default_single_fig_size)
+    ax.plot(predicted_prob, observed_freq, marker='o', linestyle='-', label='Calibration Curve')
+    ax.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Perfect Calibration')
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.legend()
+    ax.grid(True)
+    plt.tight_layout()
+    if save_path:
+        save_fig(fig, save_path)
+
