@@ -1,0 +1,85 @@
+# On-the-fly physical shower classifier (caloxtreme-compatible input).
+#
+# Reads only raw truth showers, samples CaloINN at the same conditions, then
+# builds [log1p(X/E_inc) | E_inc[GeV] | XML HLF (226)] for both in one pass.
+# This is the native replacement for the fixed-generator-file pipeline.
+#
+# The classifier checkpoint is a converted caloxtreme checkpoint, e.g.
+#   .../fcceeallegro-clf-physical-onthefly.ckpt
+# produced by scripts/caloinn-nce/convert_caloxtreme_ckpt.py.
+trainer:
+  stage_dir: /pscratch/sd/p/pmtuan/caloinn_lemurs
+  run_name: lemurs_fcceeallegro_physical_onthefly
+  accelerator: auto
+  devices: 1
+  max_epochs: 500
+  precision: 32
+  # Each validation batch also runs the 1.3 B-parameter generator, so validate
+  # once per epoch rather than every 10%.
+  val_check_interval: 1.0
+  num_sanity_val_steps: 0
+  logger:
+    - class_path: lightning.pytorch.loggers.CSVLogger
+      init_args:
+        save_dir: /pscratch/sd/p/pmtuan/caloinn_lemurs/csv_logs
+        name: lemurs_fcceeallegro_physical_onthefly
+    - class_path: calogen.core.wandb.WandbLogger
+      init_args:
+        stage_dir: /pscratch/sd/p/pmtuan/caloinn_lemurs/wandb_logs
+        project: caloinn_lightning
+        group: lemurs_fcceeallegro_physical_onthefly
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val_aucroc
+        mode: max
+        save_top_k: 3
+        filename: "{epoch}-{val_aucroc:.4f}"
+        save_last: true
+        verbose: true
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+    - class_path: calogen.core.callbacks.plot_score_histogram.ScoreHistogramCallback
+      init_args:
+        bins: 50
+  plugins:
+    - class_path: lightning.pytorch.plugins.environments.SLURMEnvironment
+      init_args:
+        requeue_signal: SIGTERM
+        auto_requeue: true
+
+data:
+  class_path: calogen.data.datamodules.caloinn.RawShowerDataModule
+  init_args:
+    data_path: /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/train_rechunked.h5
+    val_data_path: /pscratch/sd/p/pmtuan/lemurs/FCCeeALLEGRO/validation/LEMURS_FCCeeALLEGRO_gamma_100kEvents_1GeV100GeV_GPSflat_part10.h5
+    # Truth rows per batch; the module adds the same number of generated rows.
+    batch_size: 512
+    predict_batch_size: 512
+    val_frac: 0.05
+    shuffle: false          # deterministic tail split, matching caloxtreme
+    num_workers: 8
+    cache_mode: none
+    predict_multiplier: 1
+
+model:
+  class_path: calogen.classifiers.caloinn.shower_nce.LemursPhysicalShowerNCE
+  init_args:
+    hidden_dim: 1024
+    num_layers: 5
+    batch_norm: false
+    layer_norm: true
+    output_dim: 1
+    dropout: 0.75
+    activation: relu
+    generator_ckpt_path: /global/cfs/cdirs/m3443/usr/pmtuan/caloinn_lightning/checkpoints/fcceeallegro-caloinn-epoch=146-val_loss=7574.05.ckpt
+    log_transform: true
+    voxel_energy_cutoff: 1.0
+    lr: 0.0001
+    step_size: 10
+    gamma: 0.95
+    amsgrad: true
+    kw_overrides:
+      # The epoch-146 checkpoint stores a relative XML path.
+      xml_path: configs/binning_lemurs_fcceeallegro.xml
