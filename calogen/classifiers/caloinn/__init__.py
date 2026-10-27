@@ -1,3 +1,3 @@
-from .shower_nce import HLFShowerNCE, InternalShowerNCE
+from .shower_nce import HLFShowerNCE, InternalShowerNCE, LemursPhysicalShowerNCE
 
-__all__ = ["InternalShowerNCE", "HLFShowerNCE"]
+__all__ = ["InternalShowerNCE", "HLFShowerNCE", "LemursPhysicalShowerNCE"]

@@ -20,12 +20,14 @@ def load_clf(config, checkpoint, device, batch_size=1024):
     model_class_path = cfg["model"]["class_path"]
     model_class = _class_from_str(model_class_path)
     print(f"Loading model from {checkpoint}...")
-    # model = model_class.load_from_checkpoint(checkpoint, weights_only=True, strict=False, **cfg["model"]["init_args"])
     model = model_class(**cfg["model"]["init_args"])
-    sd = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    model.load_state_dict(sd["state_dict"])
-    weight_keys = [k for k in sd["state_dict"] if "weight" in k]
-    assert (model.state_dict()[weight_keys[0]] == sd["state_dict"][weight_keys[0]]).all(), "Generator weights do not match checkpoint."
+    if hasattr(model, "load_classifier_weights"):
+        # Head-only load: works for checkpoints that do not embed the generator
+        # (converted caloxtreme checkpoints) and for native ones.
+        model.load_classifier_weights(checkpoint)
+    else:
+        sd = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        model.load_state_dict(sd["state_dict"])
     model.to(device)
     model.eval()
 

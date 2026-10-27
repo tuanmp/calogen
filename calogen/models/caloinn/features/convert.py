@@ -9,9 +9,10 @@ Two representations are supported, selected with ``representation=``:
     so no energy rescaling, quantile masking or voxel cut happens.  Generator
     defects survive into the classifier input, which is the point.
 
-``"physical"`` (legacy, CaloChallenge)
+``"physical"`` (legacy, CaloChallenge / caloxtreme_clf)
     Replicates the ``caloxtreme_clf`` pipeline: ``postprocess`` -> MeV ->
-    ``scale_shower`` -> 51 XML-geometry features -> 772D concat.
+    ``scale_shower`` -> XML-geometry features -> ``[cells | E_inc | HLF]``
+    (772-D for ds1's 720 cells, 6707-D for LEMURS' 6480 cells).
 """
 
 from __future__ import annotations
@@ -26,6 +27,21 @@ from calogen.data.hlf import compute_hlf_xml_geometry, get_hlf_constants
 from calogen.data.preprocess import scale_shower_torch, voxel_cutoff_torch
 from calogen.models.caloinn.features.representation import internal_to_classifier_input
 
+_HLF_EXTRACTORS: dict[tuple[str, str], HighLevelFeatures] = {}
+
+
+def _hlf_extractor(xml_path: str, particle: str) -> HighLevelFeatures:
+    """Return a cached ``HighLevelFeatures`` (XML parsing is expensive).
+
+    Matches ``caloxtreme_clf.data.utils._get_hlf_extractor``; each DataLoader
+    worker is a separate process, so the cached object is never shared across
+    threads.
+    """
+    key = (xml_path, particle)
+    if key not in _HLF_EXTRACTORS:
+        _HLF_EXTRACTORS[key] = HighLevelFeatures(particle, filename=xml_path)
+    return _HLF_EXTRACTORS[key]
+
 
 def _compute_hlf(
     X_mev: np.ndarray,
@@ -36,23 +52,27 @@ def _compute_hlf(
     """Compute high-level features from raw showers in MeV.
 
     Replicates ``data.utils.get_high_level_features`` from caloxtreme_clf.
-    The 51 features are (in order):
+    The features are (in order):
       - E_tot (1)
-      - Per-layer energies (10)
-      - Eta centroids per layer (10)
-      - Phi centroids per layer (10)
-      - Eta widths per layer (10)
-      - Phi widths per layer (10)
+      - Per-layer energies (L)
+      - Eta centroids per layer (L_alpha)
+      - Phi centroids per layer (L_alpha)
+      - Eta widths per layer (L_alpha)
+      - Phi widths per layer (L_alpha)
+
+    That is ``1 + L + 4 * L_alpha`` columns: 51 for CaloChallenge ds1
+    (10 / 10 layers) and 226 for LEMURS (45 / 45 layers).
 
     Sparsity is intentionally excluded — it is commented out in the
     classifier training pipeline and would change the input dimension.
 
     Parameters
     ----------
-    X_mev : np.ndarray  shape (N, 720)
+    X_mev : np.ndarray  shape (N, cells)
         Raw shower cell energies in MeV.
-    Einc_mev : np.ndarray  shape (N, 1)
-        Incident energies in MeV.
+    Einc_mev : np.ndarray  shape (N,) or (N, 1)
+        Incident energies in MeV (kept for signature parity; the selected
+        features are energy-normalised and do not use it).
     xml_path : str
         Path to the XML binning file.
     particle : str
@@ -60,10 +80,10 @@ def _compute_hlf(
 
     Returns
     -------
-    np.ndarray  shape (N, 51)
+    np.ndarray  shape (N, 1 + L + 4 * L_alpha)
         Stacked high-level features.
     """
-    hlf = HighLevelFeatures(particle, filename=xml_path)
+    hlf = _hlf_extractor(xml_path, particle)
     # setattr(hlf, "Einc", Einc_mev)  — not used by CalculateFeatures, set for reference
     hlf.CalculateFeatures(X_mev)
 
@@ -113,6 +133,84 @@ def _apply_voxel_cutoff(X_mev: np.ndarray, cutoff_mev: float | None) -> np.ndarr
     if cutoff_mev is None or cutoff_mev <= 0:
         return X_mev
     return np.where(X_mev > cutoff_mev, X_mev, 0.0)
+
+
+def showers_to_classifier_input(
+    X_mev: np.ndarray,
+    Einc_mev: np.ndarray,
+    *,
+    xml_path: str,
+    particle: str,
+    log_transform: bool = False,
+    voxel_energy_cutoff: float | None = None,
+) -> np.ndarray:
+    """Physical showers → classifier input, exactly as ``caloxtreme_clf``.
+
+    This is the NumPy reference for the representation the external
+    ``caloxtreme_clf.MLPClassifier`` checkpoints were trained on:
+
+    ``[X_proc | cond_proc | X_hlf]`` where
+
+    * ``X_proc = log1p(X_mev / Einc_mev)`` (log optional), ``(N, cells)``
+    * ``cond_proc = Einc_mev / 1e3`` (incident energy in GeV), ``(N, 1)``
+    * ``X_hlf`` = XML geometry features, ``(N, 1 + L + 4 * L_alpha)``
+
+    Parameters
+    ----------
+    X_mev : np.ndarray  shape (N, cells)
+        Raw shower cell energies in MeV.
+    Einc_mev : np.ndarray  shape (N,) or (N, 1)
+        Incident energies in MeV.
+    xml_path, particle
+        Binning XML and particle name for the high-level features.
+    log_transform
+        Apply ``log1p`` to the energy-normalised cells.
+    voxel_energy_cutoff
+        Zero cells ``<=`` this threshold (MeV) before the HLF pass.
+
+    Returns
+    -------
+    np.ndarray  shape (N, cells + 1 + n_hlf)
+    """
+    X_mev = np.asarray(X_mev, dtype=np.float32)
+    Einc_mev = np.asarray(Einc_mev, dtype=np.float32).reshape(-1, 1)
+
+    X_mev = _apply_voxel_cutoff(X_mev, voxel_energy_cutoff)
+    X_hlf = _compute_hlf(X_mev, Einc_mev, xml_path, particle)
+    X_proc, cond_proc = _scale_shower(X_mev, Einc_mev)
+    if log_transform:
+        X_proc = np.log1p(X_proc)
+
+    return np.concatenate([X_proc, cond_proc, X_hlf], axis=1).astype(np.float32)
+
+
+def showers_to_classifier_input_torch(
+    X_mev: torch.Tensor,
+    Einc_mev: torch.Tensor,
+    *,
+    xml_path: str,
+    particle: str,
+    log_transform: bool = False,
+    voxel_energy_cutoff: float | None = None,
+) -> torch.Tensor:
+    """GPU-native :func:`showers_to_classifier_input` for reconstructed showers.
+
+    Accepts the MeV shower tensor produced by the generator post-processing and
+    returns the same ``[X_proc | cond_proc | X_hlf]`` layout as the NumPy
+    reference (float32, same device).
+    """
+    hlf_consts = get_hlf_constants(xml_path, particle, device=X_mev.device)
+
+    if Einc_mev.dim() == 1:
+        Einc_mev = Einc_mev.reshape(-1, 1)
+
+    X_mev = voxel_cutoff_torch(X_mev, voxel_energy_cutoff)
+    X_hlf = compute_hlf_xml_geometry(X_mev, hlf_consts)
+    X_proc, cond_proc = scale_shower_torch(X_mev, Einc_mev)
+    if log_transform:
+        X_proc = torch.log1p(X_proc)
+
+    return torch.cat([X_proc, cond_proc, X_hlf], dim=1)
 
 
 def cinn_sample_to_classifier_input(
@@ -224,26 +322,15 @@ def cinn_sample_to_classifier_input(
     Einc_gev = data["energy"]                     # (N, 1) in GeV
     Einc_mev = Einc_gev * 1e3                     # (N, 1) in MeV
 
-    # Step 4: Apply voxel energy cutoff (before HLF, matches _preprocess_batch)
-    X_mev = _apply_voxel_cutoff(X_mev, voxel_energy_cutoff)
-
-    # Step 5: Compute high-level features (requires MeV, after cutoff)
-    X_hlf = _compute_hlf(X_mev, Einc_mev, xml_path, particle)  # (N, 51)
-
-    # Step 6: Scale shower (energy-normalise, MeV→GeV for condition)
-    X_proc, cond_proc = _scale_shower(X_mev, Einc_mev)          # (N, 720), (N, 1)
-
-    # Step 7: Optional log transform (matches log_transform config)
-    if log_transform:
-        X_proc = np.log1p(X_proc)
-
-    # Step 8: Stack into classifier input
-    classifier_input = np.concatenate(
-        [X_proc, cond_proc, X_hlf],
-        axis=1,
-    ).astype(np.float32)
-
-    return classifier_input  # (N, 772)
+    # Step 4-8: cutoff → HLF → scale → optional log1p → stack
+    return showers_to_classifier_input(
+        X_mev,
+        Einc_mev,
+        xml_path=xml_path,
+        particle=particle,
+        log_transform=log_transform,
+        voxel_energy_cutoff=voxel_energy_cutoff,
+    )  # (N, cells + 1 + n_hlf)
 
 
 def cinn_sample_to_classifier_input_torch(
@@ -313,8 +400,6 @@ def cinn_sample_to_classifier_input_torch(
         )
         return torch.cat([cells, c_out, hlf], dim=1)
 
-    device = x_internal.device
-
     # Step 1: Subtract width noise
     x = x_internal - width_noise
 
@@ -333,25 +418,12 @@ def cinn_sample_to_classifier_input_torch(
     Einc_gev = data["energy"]              # (N, 1) in GeV
     Einc_mev = Einc_gev * 1e3              # (N, 1) in MeV
 
-    # Step 4: All remaining steps on GPU (zero CPU round-trips)
-    hlf_consts = get_hlf_constants(xml_path, particle, device=device)
-
-    # Voxel cutoff (before HLF)
-    X_mev = voxel_cutoff_torch(X_mev, voxel_energy_cutoff)
-
-    # High-level features (on GPU, geometry constants cached)
-    X_hlf = compute_hlf_xml_geometry(X_mev, hlf_consts)  # (N, 51)
-
-    # Scale shower (energy-normalise, MeV → GeV)
-    X_proc, cond_proc = scale_shower_torch(X_mev, Einc_mev)  # (N, 720), (N, 1)
-
-    # Optional log transform
-    if log_transform:
-        X_proc = torch.log1p(X_proc)
-
-    # Stack into classifier input
-    classifier_input = torch.cat(
-        [X_proc, cond_proc, X_hlf], dim=1
-    )
-
-    return classifier_input  # (N, 772)
+    # Step 4: All remaining steps on GPU (zone cutoff, HLF, scaling)
+    return showers_to_classifier_input_torch(
+        X_mev,
+        Einc_mev,
+        xml_path=xml_path,
+        particle=particle,
+        log_transform=log_transform,
+        voxel_energy_cutoff=voxel_energy_cutoff,
+    )  # (N, cells + 1 + n_hlf)

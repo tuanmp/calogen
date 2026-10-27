@@ -57,3 +57,10 @@ class BaseDataModule(LightningDataModule):
             self._test_dataset,
             **self._dl_kwargs(shuffle=False, batch_size=self.predict_batch_size)
         ) for _ in range(self.predict_multiplier)]
+
+    def teardown(self, stage=None):
+        """Clean up HDF5 handles opened by this DataModule."""
+        for attr in ("_train_dataset", "_val_dataset", "_test_dataset"):
+            ds = getattr(self, attr, None)
+            if ds is not None and hasattr(ds, 'source') and ds.source is not None:
+                ds.source.close()

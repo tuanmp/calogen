@@ -149,6 +149,15 @@ class Classifier(pl.LightningModule):
     def forward(self, x: torch.Tensor):
         return self.net(x)
 
+    def load_classifier_weights(self, checkpoint_path: str):
+        """Load only the MLP head from a checkpoint, ignoring everything else.
+
+        Checkpoints from this repo and from ``caloxtreme_clf`` store the head
+        under the ``net.`` prefix (``net.net.0.weight`` …), while the module
+        also owns a generator in ``CaloINNCLF``.  This pulls out just the head.
+        """
+        return load_state_dict_from_checkpoint(self.net, checkpoint_path, prefix="net.")
+
     def get_input_from_batch(self, batch):
         raise NotImplementedError("subclasses must implement get_input_from_batch")
 
@@ -219,6 +228,49 @@ class Classifier(pl.LightningModule):
         self._test_y_hat.clear()
         self._test_y.clear()
 
+
+def load_state_dict_from_checkpoint(
+    module, checkpoint_path: str, map_location="cpu", prefix: str = ""
+):
+    """Load a Lightning-style ``state_dict`` into an already-built module.
+
+    Some checkpoints (notably ``caloxtreme_clf``'s ``MLPClassifier``) carry
+    ``_class_path`` / ``_instantiator`` metadata for a class that does not
+    exist in calogen.  Trusting it makes Lightning's
+    ``load_from_checkpoint`` fail, so the weights are loaded directly instead.
+    Uninitialised ``nn.Lazy*`` layers are materialised by the load, but the
+    checkpoint must cover every parameter under ``prefix`` (no missing or
+    unexpected keys).
+
+    Parameters
+    ----------
+    module
+        Already-constructed ``nn.Module`` to fill.
+    checkpoint_path
+        Lightning ``.ckpt`` (or a plain ``state_dict``) on disk.
+    prefix
+        Strip this prefix from checkpoint keys and ignore keys outside it.
+        Used to pick the MLP head out of a module that also holds a generator
+        (``prefix="net."``).
+    """
+    ckpt = torch.load(checkpoint_path, map_location=map_location, weights_only=False)
+    state_dict = ckpt.get("state_dict", ckpt)
+    if prefix:
+        state_dict = {
+            key[len(prefix):]: value
+            for key, value in state_dict.items()
+            if key.startswith(prefix)
+        }
+    missing, unexpected = module.load_state_dict(state_dict, strict=False)
+    if missing or unexpected:
+        raise RuntimeError(
+            f"Cannot load {checkpoint_path!r} into {type(module).__name__}: "
+            f"missing={missing[:8]}{'...' if len(missing) > 8 else ''}, "
+            f"unexpected={unexpected[:8]}{'...' if len(unexpected) > 8 else ''}"
+        )
+    return module
+
+
 class GeneratorMixin:
 
     @staticmethod
@@ -233,6 +285,13 @@ class GeneratorMixin:
         assert (generator.state_dict()[weight_keys[0]] == ckpt["state_dict"][weight_keys[0]]).all(), "Generator weights do not match checkpoint."
         return generator
 
+    @torch.inference_mode()
+    def generate(self, c: torch.Tensor):
+        """
+        c : condition in GeV
+        """
+        self.generator.eval()
+        return self.generator.conditional_generate(c, measure_gen_time=False).squeeze(1)
 
 
 class NoiseContrastiveDensityRatioEstimator(Classifier):

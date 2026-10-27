@@ -14,6 +14,8 @@ from typing import Optional
 import torch
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 
+from calogen.models.caloinn.features.convert import showers_to_classifier_input_torch
+
 from ...models.caloinn.features.representation import internal_to_classifier_input
 from ...models.caloinn.lightning import CaloINNLightningModule
 from ..base import GeneratorMixin, NoiseContrastiveDensityRatioEstimator
@@ -87,8 +89,7 @@ class InternalShowerNCE(NoiseContrastiveDensityRatioEstimator, GeneratorMixin):
     def get_input_from_batch(self, batch):
 
         x_truth, c = batch
-        with torch.no_grad():
-            x_gen = self.generator.conditional_generate(c, measure_gen_time=False).squeeze(1)
+        x_gen = self.generate(c).squeeze(1)
 
         y_truth = torch.ones(x_truth.shape[0], 1, device=x_truth.device)
         y_gen = torch.zeros(x_gen.shape[0], 1, device=x_gen.device)
@@ -130,8 +131,8 @@ class HLFShowerNCE(InternalShowerNCE):
     def get_input_from_batch(self, batch):
     
         x_truth, c = batch
-        with torch.no_grad():
-            x_gen = self.generator.conditional_generate(c, measure_gen_time=False).squeeze(1)
+
+        x_gen = self.generate(c).squeeze(1)
 
         y_truth = torch.ones(x_truth.shape[0], 1, device=x_truth.device)
         y_gen = torch.zeros(x_gen.shape[0], 1, device=x_gen.device)
@@ -159,6 +160,111 @@ class HLFShowerNCE(InternalShowerNCE):
         cells, c, hlf = self.convert_func(x, c)
         logits = self.forward(torch.concat([hlf, c], dim=1)).squeeze(-1)  # shape (N,)
         return torch.exp(logits)  # r(x,c) = p(x|c)/q(x|c) = exp(logit)
+
+class LemursPhysicalShowerNCE(NoiseContrastiveDensityRatioEstimator, GeneratorMixin):
+
+    def __init__(
+        self,
+        hidden_dim: int = 256,
+        num_layers: int = 4,
+        batch_norm: bool = False,
+        layer_norm: bool = True,
+        output_dim: int = 1,
+        dropout: float = 0.0,
+        activation: str = "relu",
+        generator_ckpt_path: str | None = None,
+        log_transform: bool = False,
+        voxel_energy_cutoff: float | None = None,
+        lr: float = 1e-3,
+        step_size: int = 10,
+        gamma: float = 0.95,
+        amsgrad: bool = True,
+        kw_overrides: Optional[dict] = {}
+    ):
+        if generator_ckpt_path is None:
+            raise ValueError("generator_ckpt_path must be provided for CaloINNCLF.")
+        rank_zero_info(f"🔄 Loading generator from {generator_ckpt_path}")
+        # Build the generator BEFORE the classifier net so the RNG order matches
+        # the original implementation (generator init, then MLP init).
+        # generator = CaloINNLightningModule.load_from_checkpoint(generator_ckpt_path, **kw_overrides)
+        generator = self.load_generator(CaloINNLightningModule, generator_ckpt_path, kw_overrides)
+        rank_zero_info(f"   ✅ Generator loaded. Model has {sum(p.numel() for p in generator.parameters())} parameters.")
+    
+        super().__init__(
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            batch_norm=batch_norm,
+            layer_norm=layer_norm,
+            output_dim=output_dim,
+            dropout=dropout,
+            activation=activation,
+            lr=lr,
+            step_size=step_size,
+            gamma=gamma,
+            amsgrad=amsgrad,
+        )
+        self.generator = generator
+        self.generator.eval()  # Ensure generator is in eval mode during classifier training
+    
+        self.convert_func = partial(
+            showers_to_classifier_input_torch,
+            xml_path=self.generator.xml_path,
+            particle=self.generator.xml_ptype,
+            log_transform=log_transform,
+            voxel_energy_cutoff=voxel_energy_cutoff
+        )
+    
+        self.save_hyperparameters(ignore=["generator", "net", "convert_func", "metrics", "_val_y_hat", "_val_y", "_test_y_hat", "_test_y", "_val_z"])
+
+        self.strict_loading = False
+
+    def get_input_from_batch(self, batch):
+        # Assume unprocessed showers and conditions
+        # both showers and system in MeV
+
+        x_truth, c = batch
+        c_gev = c.reshape(-1, 1) / 1e3
+
+        x_gen = self.generate(c_gev)
+        # convert caloinn shower representation to physical showers in mev, similar to x_truth
+        data = self.generator.post_process_decoded(x_gen, c_gev)
+        num_layers = len(self.generator.layer_boundaries) - 1
+        x_gen = torch.cat([data[f"layer_{i}"] for i in range(num_layers)], dim=1) # this is in GeV
+        x_gen = x_gen * 1000.0  # Convert generated showers back to MeV 
+
+        y_truth = torch.ones(x_truth.shape[0], 1, device=x_truth.device)
+        y_gen = torch.zeros(x_gen.shape[0], 1, device=x_gen.device)
+
+        X = torch.cat([x_truth, x_gen], dim=0)
+        y = torch.cat([y_truth, y_gen], dim=0)
+        c = c.repeat(2, 1)
+
+        X_input = self.convert_func(X, c)
+
+        return X_input, y, None
+
+    def estimate_density_ratio(self, x, c):
+        """Estimate the density ratio p(x|c) / q(x|c) using the trained classifier.
+
+        Parameters
+        ----------
+        x : torch.Tensor shape (N, D)
+            Samples from the proposal distribution q(x|c). Assumed un-postprocessed showers from caloinn (immediately after conditional_generate)
+        c : torch.Tensor shape (N, C)
+            Conditioning variables corresponding to each sample x.
+        """
+
+        # convert caloinn shower representation to physical showers in mev, similar to x_truth
+        data = self.generator.post_process_decoded(x, c)
+        num_layers = len(self.generator.layer_boundaries) - 1
+        x_gen = torch.cat([data[f"layer_{i}"] for i in range(num_layers)], dim=1) # this is in GeV
+        x_gen = x_gen * 1000.0  # Convert generated showers back to MeV 
+
+        X_input = self.convert_func(x_gen, c * 1000) 
+
+        logits = self.forward(X_input).squeeze(-1)  # shape (N,)
+        return torch.exp(logits)  # r(x,c) = p(x|c)/q(x|c) = exp(logit)
+    
 
 # class CaloINNLatentNCE(NoiseContrastiveDensityRatioEstimator):
 #     """Latent-space NCE density-ratio estimator over the CaloINN latent."""

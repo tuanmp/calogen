@@ -46,8 +46,35 @@ class BaseSampler:
     def load_model(self):
         model_class_path = self.cfg["model"]["class_path"]
         model_class = _class_from_str(model_class_path)
+        init_args = dict(self.cfg["model"].get("init_args") or {})
+        # Weights always come from ``model_path``; never let the config silently
+        # point the sampler at a different classifier.
+        init_args.pop("classifier_ckpt_path", None)
+
         print(f"Loading model from {self.model_path}...")
-        model = model_class.load_from_checkpoint(self.model_path, **self.cfg["model"]["init_args"])
+        ckpt = torch.load(self.model_path, map_location="cpu", weights_only=False)
+        hparams = ckpt.get("hyper_parameters") or {}
+        saved_class = (
+            hparams.get("_class_path")
+            if isinstance(hparams, dict)
+            else getattr(hparams, "_class_path", None)
+        )
+
+        if saved_class == model_class_path:
+            model = model_class.load_from_checkpoint(self.model_path, **init_args)
+        else:
+            # Checkpoint from another repo (e.g. caloxtreme_clf): its
+            # ``_class_path`` / ``_instantiator`` cannot build a calogen class,
+            # so instantiate from the config and load the weights directly.
+            print(f"  foreign checkpoint ({saved_class}); loading weights only")
+            model = model_class(**init_args)
+            if hasattr(model, "load_classifier_weights"):
+                model.load_classifier_weights(self.model_path)
+            else:
+                from calogen.classifiers.base import load_state_dict_from_checkpoint
+
+                load_state_dict_from_checkpoint(model, self.model_path)
+
         model.to(self.device)
         model.setup(stage="fit")
         return model
@@ -65,7 +92,13 @@ class BaseSampler:
         return data_module
 
     def collect_conditions(self, loader: str = "test", max_samples: int | None = None) -> torch.Tensor:
-        """Collect conditions from the dataloader."""
+        """Collect conditions from the dataloader.
+
+        Datamodules may expose ``condition_scale`` when their batches carry
+        conditions in a different unit than the generator expects (e.g. raw
+        MeV truth energies); the returned tensor is always in generator units
+        (GeV).
+        """
         match loader:
             case "train":
                 dataloader = self.datamodule.train_dataloader()
@@ -75,13 +108,14 @@ class BaseSampler:
                 dataloader = self.datamodule.test_dataloader()
             case _:
                 raise ValueError(f"Unknown loader type: {loader}. Must be one of 'train', 'val', or 'test'.")
+        scale = float(getattr(self.datamodule, "condition_scale", 1.0))
         conditions = []
         for batch in tqdm(dataloader, desc=f"Collecting conditions from {loader} dataloader"):
             if isinstance(batch, (list, tuple)):
                 c = batch[1]
             elif isinstance(batch, dict):
                 c = batch["c"]
-            conditions.append(c)
+            conditions.append(c * scale)
             if max_samples is not None and sum(len(c) for c in conditions) >= max_samples:
                 break
         return torch.cat(conditions, dim=0)

@@ -5,6 +5,7 @@ from calogen.classifiers.base import (
     Classifier,
     NoiseContrastiveDensityRatioEstimator,
     PrecomputedLatentNCE,
+    load_state_dict_from_checkpoint,
 )
 from calogen.classifiers.whitened_nce import PrecomputedLatentWhitenedNCE
 
@@ -14,4 +15,5 @@ __all__ = [
     "NoiseContrastiveDensityRatioEstimator",
     "PrecomputedLatentNCE",
     "PrecomputedLatentWhitenedNCE",
+    "load_state_dict_from_checkpoint",
 ]

@@ -3,8 +3,9 @@ from typing import Any, Tuple
 
 import numpy as np
 import torch
-from calogen.core.caloch_eval import HighLevelFeatures as HLF
 from torch.utils.data import Dataset
+
+from calogen.core.caloch_eval import HighLevelFeatures as HLF
 
 from .. import data_util
 from ..sources import HDF5Source, MemmapSource
@@ -91,6 +92,7 @@ class CaloINNDataset(Dataset):
         showers = self.source.truth_format.flatten_showers(showers)
 
         # Build data dict (matches legacy load_data pattern)
+        # data = {"energy": incident energy in GeV, "layer_i": layer_i in GeV}
         data = data_util._build_data_dict(showers, energies, self.layer_boundaries)
 
         # Legacy preprocessing
@@ -116,5 +118,36 @@ class CaloINNDataset(Dataset):
                 x = data_util.add_noise(
                     x, self.width_noise, copy=False, draw_dtype=np.float32
                 )
+        # output preprocessed showers with extra dimensions 
+        # and incident energy in GeV as condition
+        return x, c
+
+class RawShowerDataset(CaloINNDataset):
+    """A dataset that provides raw shower data without any preprocessing."""
+    def __init__(
+        self,
+        source: HDF5Source | MemmapSource,
+        indices: np.ndarray
+    ):
+        self.source = source
+        self.indices = np.asarray(indices, dtype=np.int64)
+        
+
+    def _get_numpy_batch(
+        self, local_indices: np.ndarray
+    ) -> Tuple[np.ndarray | torch.Tensor, np.ndarray | torch.Tensor]:
+        """Load raw data, preprocess, add noise — all vectorised."""
+        source_indices = local_indices
+        if isinstance(self.source, HDF5Source):
+            source_indices = self.indices[local_indices]
+        showers, energies = self.source.read_rows(source_indices)
+
+        # 3-D LEMURS (N, R, Phi, Z) → flat (N, cells); no-op for flat input.
+        # Must precede _build_data_dict, which slices the last axis.
+        showers = self.source.truth_format.flatten_showers(showers)
+
+        # Convert to float32 tensors for noise + output
+        x = showers.astype(np.float32, copy=False)
+        c = energies.reshape(-1, 1).astype(np.float32, copy=False)
 
         return x, c
