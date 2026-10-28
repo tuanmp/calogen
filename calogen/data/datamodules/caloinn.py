@@ -3,7 +3,11 @@ import numpy as np
 from calogen.core.xml_handler import XMLHandler
 from calogen.data.data_util import TruthFormat
 
-from ..datasets.caloinn import CaloINNDataset, RawShowerDataset
+from ..datasets.caloinn import (
+    CaloINNDataset,
+    ContrastiveRawShowerDataset,
+    RawShowerDataset,
+)
 from ..sources import HDF5Source, MemmapSource
 from .base_datamodule import BaseDataModule
 from .memmap_mixin import MemmapMixin
@@ -252,4 +256,97 @@ class RawShowerDataModule(BaseDataModule, MemmapMixin):
         self._test_dataset = RawShowerDataset(
             source=val_source,
             indices=val_valid
+        )
+
+class ContrastiveRawShowerDataModule(BaseDataModule, MemmapMixin):
+
+    def __init__(
+        self,
+        truth_data_path: str,
+        gen_data_path: str,
+        val_truth_data_path: str,
+        val_gen_data_path: str,
+        batch_size: int,
+        val_frac: float = 0.01,
+        shuffle: bool = False,
+        num_workers: int = 0,
+        predict_batch_size: int = 1000,
+        predict_multiplier: int = 1,
+        **kwargs,
+    ):
+        super().__init__(
+            batch_size=batch_size,
+            predict_batch_size=predict_batch_size,
+            num_workers=num_workers,
+            shuffle=shuffle,
+            predict_multiplier=predict_multiplier,
+        )
+
+        self.truth_data_path = truth_data_path
+        self.gen_data_path = gen_data_path
+        self.val_truth_data_path = val_truth_data_path
+        self.val_gen_data_path = val_gen_data_path
+        self.val_frac = val_frac
+
+        # Sampling helpers: the neural sampler consumes incident energies in
+        # GeV, while this datamodule yields the raw MeV values.
+        self.truth_format = TruthFormat.detect_from_file(self.truth_data_path)
+        self.condition_scale = 1.0e-3
+
+
+    def setup(self, stage=None):
+        
+        # no compute filter indices. usee all
+        truth_source = HDF5Source(self.truth_data_path)
+        gen_source = HDF5Source(self.gen_data_path)
+    
+        truth_train_valid = np.arange(len(truth_source), dtype=np.int64)
+        gen_train_valid = np.arange(len(gen_source), dtype=np.int64)
+        # One-time shuffle before split (matching legacy)
+        if self.shuffle:
+            rng = np.random.RandomState(42)
+            truth_train_valid = truth_train_valid[rng.permutation(len(truth_train_valid))]
+            gen_train_valid = gen_train_valid[rng.permutation(len(gen_train_valid))]
+
+    
+        n_truth_total = len(truth_train_valid)
+        n_truth_val = int(n_truth_total * self.val_frac)
+        n_truth_train = n_truth_total - n_truth_val
+
+        n_gen_total = len(gen_train_valid)
+        n_gen_val = int(n_gen_total * self.val_frac)
+        n_gen_train = n_gen_total - n_gen_val
+    
+        self.num_train_samples = n_truth_train + n_gen_train
+    
+        # train_indices = np.sort(train_valid[:n_train])
+        # val_indices = np.sort(train_valid[n_train:])
+    
+        # build train val sets
+        print(f"📦 Building train/val dataset from {self.truth_data_path} and {self.gen_data_path}...")
+
+    
+        self._train_dataset = ContrastiveRawShowerDataset(
+            truth_source=truth_source,
+            gen_source=gen_source,
+            truth_indices=np.sort(truth_train_valid[:n_truth_train]), 
+            gen_indices=np.sort(gen_train_valid[:n_gen_train]),
+        )
+        self._val_dataset = ContrastiveRawShowerDataset(
+            truth_source=truth_source,
+            gen_source=gen_source,
+            truth_indices=np.sort(truth_train_valid[n_truth_train:]),
+            gen_indices=np.sort(gen_train_valid[n_gen_train:]),
+        )
+    
+        # build test set
+        print(f"📦 Building test/predict dataset from {self.val_truth_data_path} and {self.val_gen_data_path}...")
+        # val_valid = self._compute_filter_indices(self.val_data_path)
+        # val_source = HDF5Source(self.val_truth_data_path)
+        # val_valid = np.arange(len(val_source), dtype=np.int64)
+        self._test_dataset = ContrastiveRawShowerDataset(
+            truth_source=HDF5Source(self.val_truth_data_path),
+            gen_source=HDF5Source(self.val_gen_data_path),
+            truth_indices=np.arange(len(HDF5Source(self.val_truth_data_path)), dtype=np.int64),
+            gen_indices=np.arange(len(HDF5Source(self.val_gen_data_path)), dtype=np.int64)
         )

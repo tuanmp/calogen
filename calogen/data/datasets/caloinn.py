@@ -4,6 +4,7 @@ from typing import Any, Tuple
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from torchgen import local
 
 from calogen.core.caloch_eval import HighLevelFeatures as HLF
 
@@ -151,3 +152,60 @@ class RawShowerDataset(CaloINNDataset):
         c = energies.reshape(-1, 1).astype(np.float32, copy=False)
 
         return x, c
+
+class ContrastiveRawShowerDataset(Dataset):
+    def __init__(
+        self,
+        truth_source: HDF5Source | MemmapSource,
+        gen_source: HDF5Source | MemmapSource,
+        truth_indices: np.ndarray,
+        gen_indices: np.ndarray
+    ):
+        self.truth_source = truth_source
+        self.gen_source = gen_source
+        self.truth_indices = np.asarray(truth_indices, dtype=np.int64)
+        self.gen_indices = np.asarray(gen_indices, dtype=np.int64)
+
+    def __len__(self) -> int:
+        return min(len(self.truth_indices), len(self.gen_indices))
+
+    def __getitems__(self, indices):
+        idx = np.asarray(indices, dtype=np.int64)
+        x, c, y = self._get_numpy_batch(idx)
+        return [
+            (
+                torch.from_numpy(x[i]).to(dtype), 
+                torch.from_numpy(c[i]).to(dtype),
+                torch.from_numpy(y[i]).to(dtype)
+            )
+            for i in range(len(x))
+        ]
+
+    def _get_numpy_batch(
+        self, local_indices: np.ndarray
+    ) -> Tuple[np.ndarray | torch.Tensor, np.ndarray | torch.Tensor, np.ndarray | torch.Tensor]:
+        """Load raw data, preprocess, add noise — all vectorised."""
+
+        if isinstance(self.truth_source, HDF5Source):
+            _local_indices = local_indices[local_indices < len(self.truth_indices)]
+            truth_source_indices = self.truth_indices[_local_indices]
+        if isinstance(self.gen_source, HDF5Source):
+            _local_indices = local_indices[local_indices < len(self.gen_indices)]
+            gen_source_indices = self.gen_indices[_local_indices]
+        
+        truth_showers, truth_energies = self.truth_source.read_rows(truth_source_indices)
+        gen_showers, gen_energies = self.gen_source.read_rows(gen_source_indices)
+
+        showers = np.concatenate([truth_showers, gen_showers], axis=0)
+        energies = np.concatenate([truth_energies, gen_energies], axis=0)
+
+        # 3-D LEMURS (N, R, Phi, Z) → flat (N, cells); no-op for flat input.
+        # Must precede _build_data_dict, which slices the last axis.
+        showers = self.truth_source.truth_format.flatten_showers(showers)
+
+        # Convert to float32 tensors for noise + output
+        x = showers.astype(np.float32, copy=False)
+        c = energies.reshape(-1, 1).astype(np.float32, copy=False)
+        y = np.concatenate([np.ones(len(truth_showers)), np.zeros(len(gen_showers))], axis=0).reshape(-1, 1).astype(np.float32, copy=False)
+
+        return x, c, y

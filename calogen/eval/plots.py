@@ -161,3 +161,39 @@ def plot_calibration(
     if save_path:
         save_fig(fig, save_path)
 
+def plot_roc_curve(
+    scores: np.ndarray,
+    labels: np.ndarray,
+    title: str = "ROC Curve",
+    xlabel: str = "False Positive Rate",
+    ylabel: str = "True Positive Rate",
+    save_path: Path | str | None = None
+):
+    """
+    Plots the ROC curve for the given scores and labels.
+
+    Args:
+        scores (np.ndarray): Array of predicted probabilities.
+        labels (np.ndarray): Array of true labels (0 or 1).
+        title (str): Title of the plot.
+        xlabel (str): Label for the x-axis.
+        ylabel (str): Label for the y-axis.
+        save_path (Path | str | None): Path to save the plot.
+    """
+    from sklearn.metrics import auc, roc_curve
+
+    fpr, tpr, _ = roc_curve(labels, scores)
+    roc_auc = auc(fpr, tpr)
+
+    fig, ax = plt.subplots(figsize=default_single_fig_size)
+    ax.plot(fpr, tpr, color='blue', lw=2, label=f'ROC curve (area = {roc_auc:.3f})')
+    ax.plot([0, 1], [0, 1], color='gray', lw=2, linestyle='--', label='Random Guess')
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    ax.legend(loc="lower right")
+    plt.tight_layout()
+    if save_path:
+        save_fig(fig, save_path)

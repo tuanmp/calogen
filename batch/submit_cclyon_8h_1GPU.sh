@@ -5,7 +5,7 @@
 #   sbatch batch/submit_cclyon_8h_1GPU.sh
 #   sbatch batch/submit_cclyon_8h_1GPU.sh --config params/lemurs_fcceeallegro.yaml
 
-#SBATCH --job-name=caloinn_train
+#SBATCH --job-name=calogen
 #SBATCH --output=slurm_logs/cclyon-%j-%x.out
 #SBATCH --error=slurm_logs/cclyon-%j-%x.err
 #SBATCH --nodes=1

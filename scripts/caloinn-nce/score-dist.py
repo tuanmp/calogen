@@ -7,7 +7,7 @@ import torch
 import yaml
 from tqdm import tqdm
 
-from calogen.eval.plots import plot_calibration, plot_score_histo
+from calogen.eval.plots import plot_calibration, plot_roc_curve, plot_score_histo
 from calogen.sampler.base import _class_from_str
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -97,9 +97,11 @@ def main():
 
     plot_score_histo(y_hat, y, log_scale=True, save_path=output_dir / "score_histo.png")
     plot_calibration(y_hat, y, save_path=output_dir / "calibration.png")
+    plot_roc_curve(y_hat, y, save_path=output_dir / "roc_curve.png")
 
     report["score_histo"] = str(output_dir / "score_histo.png")
     report["calibration"] = str(output_dir / "calibration.png")
+    report["roc_curve"] = str(output_dir / "roc_curve.png")
     report["scores"] = str(output_dir / "scores.npz")
 
     with open(output_dir / "report.json", "w") as f:
