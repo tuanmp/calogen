@@ -113,6 +113,8 @@ def main():
     p.add_argument("--device", default="cuda")
     p.add_argument("--seed", type=int, default=None, help="RNG seed.")
     p.add_argument("--out", required=True, help="Output HDF5 path.")
+    p.add_argument("--compile", action="store_true",
+                   help="Compile the model for faster inference."   )
     args = p.parse_args()
 
     output_path = Path(args.out)
@@ -136,6 +138,8 @@ def main():
     try:
         print(f"[{now()}] 🔧 Loading generator from {args.gen_config},\n {args.gen_ckpt}")
         gen, data_module = initialize_gen(args.gen_config, args.gen_ckpt, args.device)
+        if args.compile:
+            gen = torch.compile(gen)
 
         reference = (
             args.generate_from or data_module.val_data_path or data_module.data_path
