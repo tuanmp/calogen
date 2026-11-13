@@ -27,3 +27,5 @@ opencode.json
 *.png
 *.pdf
 *.json
+*.npz
+*.h5

@@ -70,8 +70,8 @@ data:
     u0low_cut: 0.0
     rew: 1.0
     dep_cut: 600
-    # width_noise: 0.000005
-    width_noise: 1e-5
+    width_noise: 0.00001
+    # width_noise: 1e-5
     shuffle: true
     num_workers: 2
     predict_batch_size: 1000
@@ -88,8 +88,8 @@ model:
     max_init_samples: 5000
     shuffle_init_batch: false
     num_noise_doses: 2
-    # width_noise: 0.000005
-    width_noise: 1e-5
+    width_noise: 0.00001
+    # width_noise: 1e-5
     custom_noise: false
     xml_path: configs/binning_lemurs_fcceeallegro.xml
     xml_ptype: photon
