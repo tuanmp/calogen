@@ -17,7 +17,7 @@ def set_style() -> None:
     sns.set_context("talk")
     plt.rcParams.update({
         "font.family": "serif",
-        "font.size": 12,
+        "font.size": 10,
         "axes.titlesize": "medium",
         "mathtext.default": "rm",
         "text.usetex": False,
