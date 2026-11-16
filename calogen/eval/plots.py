@@ -13,9 +13,11 @@ _DUP = lambda a: np.append(a, a[-1])
 default_single_fig_size = (8, 6)
 
 def set_style() -> None:
+    import seaborn as sns
+    sns.set_context("talk")
     plt.rcParams.update({
         "font.family": "serif",
-        "font.size": 14,
+        "font.size": 12,
         "axes.titlesize": "medium",
         "mathtext.default": "rm",
         "text.usetex": False,
@@ -28,13 +30,13 @@ def hist_with_ratio(ref, gens: Dict[str, np.ndarray], bins, xlabel,
     bins = np.asarray(bins, dtype=np.float64)
     fig, (ax, rax) = plt.subplots(
         2, 1, figsize=(5, 4.5), sharex=True,
-        gridspec_kw={"height_ratios": (4, 1), "hspace": 0.0})
+        gridspec_kw={"height_ratios": (4, 1), "hspace": 0.1})
 
     counts_ref, _ = np.histogram(ref, bins=bins)
     total_ref = counts_ref.sum()
     ref_norm = counts_ref / total_ref if total_ref else counts_ref.astype(float)
     ref_err = ref_norm / np.sqrt(np.maximum(counts_ref, 1.0))
-    ax.step(bins, _DUP(ref_norm), where="post", color="k", lw=1.0, label="truth")
+    ax.step(bins, _DUP(ref_norm), where="post", color="k", lw=1.0, label="GEANT4")
     ax.fill_between(bins, _DUP(ref_norm + ref_err), _DUP(np.maximum(ref_norm - ref_err, 0)),
                     step="post", color="k", alpha=0.2)
     rax.fill_between(bins, _DUP(1 - ref_err / np.maximum(ref_norm, 1e-12)),
@@ -60,7 +62,7 @@ def hist_with_ratio(ref, gens: Dict[str, np.ndarray], bins, xlabel,
     rax.axhline(ratio_ylim[1], color="k", ls="--", lw=0.5)
     rax.set_ylim(*ratio_ylim)
     rax.set_xlabel(xlabel)
-    rax.set_ylabel("model/truth")
+    rax.set_ylabel("Model/Truth")
     ax.set_ylabel("a.u.")
     ax.set_xscale(xscale)
     rax.set_xscale(xscale)
@@ -68,7 +70,7 @@ def hist_with_ratio(ref, gens: Dict[str, np.ndarray], bins, xlabel,
     ax.legend(frameon=False, fontsize=10)
     if title:
         ax.set_title(title)
-    fig.tight_layout(pad=0.2)
+    fig.tight_layout(pad=0.1)
     return fig
 
 

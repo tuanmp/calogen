@@ -65,7 +65,9 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
         if n not in OBSERVABLES:
             raise ValueError(f"Unknown observable {n!r}; valid: {sorted(OBSERVABLES)}")
 
-    truth = load_showers(cfg.truth, "truth", max_events=cfg.max_events,
+    print("Loading showers...")
+
+    truth = load_showers(cfg.truth, "GEANT4", max_events=cfg.max_events,
                          threshold_mev=cfg.threshold_mev,
                          energy_range=cfg.energy_range, seed=cfg.seed)
     gens = [load_showers(g["path"], g["label"], max_events=cfg.max_events,
@@ -78,7 +80,7 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
 
     records: List[MetricRecord] = []
     artifacts: List[str] = []
-    lines = [f"truth: {cfg.truth} ({len(truth.showers)} events)"]
+    lines = [f"Truth: {cfg.truth} ({len(truth.showers)} events)"]
 
     pdf = PdfPages(os.path.join(cfg.out_dir, "summary.pdf")) if cfg.make_pdf else None
 
@@ -90,6 +92,10 @@ def evaluate_lemurs(cfg: EvalConfig) -> EvalResult:
         artifacts.append(path)
 
     for name in names:
+
+        print(f"Processing observable {name}...")
+
+
         obs = OBSERVABLES[name]
         ref = obs.compute(ctx_truth)
         gen_vals = {g.label: obs.compute(ctx) for g, ctx in zip(gens, ctx_gens)}
